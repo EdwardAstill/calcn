@@ -1,0 +1,152 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "items": [
+    {
+      "name": "calculator",
+      "type": "registry:block",
+      "title": "Scientific Calculator",
+      "description": "A shadcn Base UI scientific calculator backed by a Pyodide and SymPy solver.",
+      "dependencies": [
+        "lucide-react",
+        "pyodide@314.0.6",
+        "recharts@3.8.0"
+      ],
+      "registryDependencies": [
+        "alert",
+        "badge",
+        "button",
+        "checkbox",
+        "dialog",
+        "field",
+        "input",
+        "separator",
+        "spinner",
+        "tabs",
+        "tooltip",
+        "chart"
+      ],
+      "files": [
+        {
+          "path": "lib/model.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/model.ts"
+        },
+        {
+          "path": "lib/operations.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/operations.ts"
+        },
+        {
+          "path": "components/scientific-calculator.tsx",
+          "type": "registry:component",
+          "target": "@components/calculator/scientific-calculator.tsx"
+        },
+        {
+          "path": "lib/reducer.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/reducer.ts"
+        },
+        {
+          "path": "components/index.ts",
+          "type": "registry:component",
+          "target": "@components/calculator/index.ts"
+        },
+        {
+          "path": "lib/generated/solver-worker-source.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/generated/solver-worker-source.ts"
+        },
+        {
+          "path": "lib/generated/solver-source.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/generated/solver-source.ts"
+        },
+        {
+          "path": "lib/generated/help-content.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/generated/help-content.ts"
+        },
+        {
+          "path": "lib/dsl/tokenize.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/dsl/tokenize.ts"
+        },
+        {
+          "path": "lib/dsl/analyze.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/dsl/analyze.ts"
+        },
+        {
+          "path": "lib/dsl/latex.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/dsl/latex.ts"
+        },
+        {
+          "path": "lib/dsl/mathml.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/dsl/mathml.ts"
+        },
+        {
+          "path": "lib/dsl/parser.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/dsl/parser.ts"
+        },
+        {
+          "path": "lib/dsl/ast.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/dsl/ast.ts"
+        },
+        {
+          "path": "ui/result-card.tsx",
+          "type": "registry:ui",
+          "target": "@ui/calculator/result-card.tsx"
+        },
+        {
+          "path": "lib/solver/solver.worker.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/solver/solver.worker.ts"
+        },
+        {
+          "path": "lib/solver/preflight.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/solver/preflight.ts"
+        },
+        {
+          "path": "lib/solver/protocol.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/solver/protocol.ts"
+        },
+        {
+          "path": "lib/solver/client.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/solver/client.ts"
+        },
+        {
+          "path": "lib/solver/solver.py",
+          "type": "registry:file",
+          "target": "@lib/calculator/solver/solver.py"
+        },
+        {
+          "path": "lib/plot.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/plot.ts"
+        },
+        {
+          "path": "ui/relation-plot.tsx",
+          "type": "registry:ui",
+          "target": "@ui/calculator/relation-plot.tsx"
+        },
+        {
+          "path": "lib/plot-interaction.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/plot-interaction.ts"
+        },
+        {
+          "path": "ui/plot-interaction.tsx",
+          "type": "registry:ui",
+          "target": "@ui/calculator/plot-interaction.tsx"
+        }
+      ]
+    }
+  ]
+}

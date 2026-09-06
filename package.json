@@ -1,0 +1,76 @@
+{
+  "name": "calcn",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scientific calculator with symbolic algebra, calculus, and plots",
+  "author": "Edward Astill",
+  "main": "electron/main.mjs",
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "dev": "bun run desktop",
+    "start": "bun run desktop",
+    "registry:serve": "bun run build && bun app/server.ts",
+    "build": "bun run registry:build && bun run css && bun build ./app/index.html --outdir dist --production && mkdir -p dist/r && cp -r public/r/. dist/r",
+    "desktop": "bun run build && electron .",
+    "desktop:install": "bun run build:executable && bun scripts/install-desktop.ts",
+    "build:executable": "bun run build && electron-builder --publish never",
+    "css": "bunx @tailwindcss/cli -i app/styles/globals.css -o app/styles/build.css --minify",
+    "css:watch": "bunx @tailwindcss/cli -i app/styles/globals.css -o app/styles/build.css --watch=always",
+    "calculator:gen": "bun scripts/render-calculator-help.ts && bun scripts/render-calculator-solver-source.ts && bun scripts/render-calculator-solver-worker.ts",
+    "registry:validate": "shadcn registry validate ./registry.json",
+    "registry:build": "bun run calculator:gen && bun run registry:validate && shadcn build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "bun test ./tests",
+    "check": "bun run registry:validate && bun run typecheck && bun run lint && bun run test"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.8.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cn": "^0.2.5",
+    "lucide-react": "^0.487.0",
+    "pyodide": "^314.0.6",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "recharts": "3.8.0",
+    "shadcn": "^4.21.0",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/bun": "^1.4.0",
+    "@types/node": "^20.19.43",
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.69.0"
+  },
+  "build": {
+    "appId": "com.edwardastill.calcn",
+    "productName": "calcn",
+    "directories": { "output": "release" },
+    "files": [
+      "electron/main.mjs",
+      "dist/**/*.html",
+      "dist/**/*.js",
+      "dist/**/*.css",
+      "dist/r/*.json",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "npmRebuild": false,
+    "linux": { "target": "AppImage", "category": "Education" },
+    "mac": { "target": "dmg", "category": "public.app-category.education" },
+    "win": { "target": "nsis" }
+  },
+  "overrides": {
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+app/styles/build.css
+*.tsbuildinfo
+.env
+.env.*
