@@ -32,6 +32,7 @@ export const initialCalculatorState: CalculatorState = {
 }
 
 export type CalculatorAction =
+  | { type: 'library-added'; relations: Relation[] }
   | { type: 'source-changed'; source: string }
   | {
       type: 'save'

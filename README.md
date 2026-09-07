@@ -13,7 +13,8 @@ bun run desktop:install
 calcn
 ```
 
-This installs a standalone Electron AppImage at `~/.local/bin/calcn`.
+This installs a standalone Electron AppImage at `~/.local/bin/calcn`, plus an
+application-menu entry under `${XDG_DATA_HOME:-~/.local/share}`.
 Ensure `~/.local/bin` is on your PATH. Running `calcn` opens its own desktop
 window directly. Run `bun run desktop:install` again after making changes.
 For development, `bun run dev` builds and opens the Electron app from source.
@@ -23,6 +24,19 @@ Package without installing:
 ```bash
 bun run build:executable
 ```
+
+For Linux releases, distribute both `release/calcn-<version>.AppImage` and
+`release/install-calcn.sh`. Users can download them and install without Bun or
+the source checkout:
+
+```bash
+sh install-calcn.sh ./calcn-<version>.AppImage
+```
+
+The installer registers calcn with Linux application menus (including Fuzzel).
+Run it again with a newer AppImage to update the installed app. The installed
+app is a built snapshot; source edits require rebuilding and reinstalling.
+Running the AppImage directly does not register a menu entry.
 
 Packages are written to `release/`: an AppImage on Linux, a DMG on macOS,
 or an EXE installer on Windows. Build on the target operating system.
@@ -66,16 +80,23 @@ For local registry development, run `bun run registry:serve` and install from
 
 ## Build and verify
 
+The **Library** tab above the relations opens a floating equation picker. Select
+equations and click **Add selected** to append them to the current relations.
+Library entries come from Markdown files in `library/`: headings name groups and
+`$...$` or `$$...$$` delimit equations in calculator notation. Use explicit
+multiplication between variables, such as `$V = I*R$`. Rebuild the app after
+editing the library; its equations are bundled for desktop and registry use.
+
 ```bash
 bun run check
 bun run build
 ```
 
-`build` regenerates solver/help assets and registry JSON, compiles CSS, and
+`build` regenerates solver/help/library assets and registry JSON, compiles CSS, and
 creates the frontend files in `dist/` that Electron loads, including the registry
 at `dist/r/`. Hosted registry installs use `<your-origin>/r/calculator.json`.
 
-After changing help, Python, or worker sources, run `bun run calculator:gen`.
+After changing library, help, Python, or worker sources, run `bun run calculator:gen`.
 `bun run registry:build` also regenerates these assets and writes `public/r/`.
 
 See [calculator documentation](registry/calculator/README.md) for notation and solver behavior.

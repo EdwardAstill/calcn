@@ -14,6 +14,12 @@ export function calculatorReducer(
   action: CalculatorAction,
 ): CalculatorState {
   switch (action.type) {
+    case 'library-added':
+      return {
+        ...state,
+        relations: [...state.relations, ...action.relations],
+        solver: idleSolver(),
+      }
     case 'source-changed':
       return { ...state, source: action.source }
     case 'save': {

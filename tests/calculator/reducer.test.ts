@@ -4,6 +4,30 @@ import { initialCalculatorState } from '@/registry/calculator/lib/model'
 import { calculatorReducer } from '@/registry/calculator/lib/reducer'
 
 describe('calculatorReducer', () => {
+  it('adds library equations without overwriting an edit and invalidates pending results', () => {
+    const relation = { id: 'r1', source: 'x=1', ast: parseRelation('x=1'), createdAt: 1, enabled: true }
+    const state = {
+      ...initialCalculatorState,
+      relations: [relation],
+      editingId: 'r1',
+      source: 'x=2',
+      solver: { phase: 'loading' as const, requestId: 'pending' },
+    }
+    const added = calculatorReducer(state, {
+      type: 'library-added',
+      relations: [
+        { id: 'r2', source: 'V=I*R', ast: parseRelation('V=I*R'), createdAt: 2, enabled: true },
+        { id: 'r3', source: 'v=u+a*t', ast: parseRelation('v=u+a*t'), createdAt: 3, enabled: true },
+      ],
+    })
+    expect(added.relations.map((row) => row.id)).toEqual(['r1', 'r2', 'r3'])
+    expect(added.relations[0]).toEqual(relation)
+    expect(added).toMatchObject({ editingId: 'r1', source: 'x=2', solver: { phase: 'idle' } })
+    expect(calculatorReducer(added, {
+      type: 'solve-finished', requestId: 'pending', result: { status: 'no-solution', message: 'Old result' },
+    })).toEqual(added)
+  })
+
   it('saves an edit in place without duplicating or reordering', () => {
     const added = calculatorReducer(initialCalculatorState, {
       type: 'save',

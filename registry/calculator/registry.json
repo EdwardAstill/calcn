@@ -17,7 +17,10 @@
         "button",
         "checkbox",
         "dialog",
+        "dropdown-menu",
+        "empty",
         "field",
+        "input-group",
         "input",
         "separator",
         "spinner",
@@ -26,6 +29,11 @@
         "chart"
       ],
       "files": [
+        {
+          "path": "ui/operation-label.tsx",
+          "type": "registry:ui",
+          "target": "@ui/calculator/operation-label.tsx"
+        },
         {
           "path": "lib/model.ts",
           "type": "registry:lib",
@@ -60,6 +68,11 @@
           "path": "lib/generated/solver-source.ts",
           "type": "registry:lib",
           "target": "@lib/calculator/generated/solver-source.ts"
+        },
+        {
+          "path": "lib/generated/equation-library.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/generated/equation-library.ts"
         },
         {
           "path": "lib/generated/help-content.ts",

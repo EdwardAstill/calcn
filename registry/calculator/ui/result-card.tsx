@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 
 import type { SolverState } from '@/registry/calculator/lib/model'
+import { toMathMl } from '@/registry/calculator/lib/dsl/mathml'
 import type { SolverEngineSnapshot } from '@/registry/calculator/lib/solver/client'
 import type { DisplayValue, SolverResult } from '@/registry/calculator/lib/solver/protocol'
 
@@ -16,7 +17,7 @@ type ResultCardProps = {
 
 function Value({ value }: { value: DisplayValue }) {
   return (
-    <span>
+    <span className="inline-flex flex-wrap items-center justify-end gap-2 text-base">
       <span
         aria-hidden="true"
         dangerouslySetInnerHTML={{
@@ -24,7 +25,12 @@ function Value({ value }: { value: DisplayValue }) {
         }}
       />
       <code className="sr-only">{value.exact}</code>
-      {value.approximate ? ` ≈ ${value.approximate}` : null}
+      {value.approximate ? (
+        <span className="text-muted-foreground">
+          {'≈ '}
+          <span dangerouslySetInnerHTML={{ __html: toMathMl({ kind: 'number', value: value.approximate }) }} />
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -46,14 +52,16 @@ function Solved({ result }: { result: Extract<SolverResult, { status: 'solved' }
           <dl className="grid gap-2">
             {Object.entries(solution.assignments).map(([name, value]) => (
               <div className="flex items-center justify-between gap-4" key={name}>
-                <dt>{name}</dt>
-                <dd><Value value={value} /></dd>
+                <dt className="text-base" aria-label={name}>
+                  <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: toMathMl({ kind: 'symbol', name }) }} />
+                </dt>
+                <dd className="min-w-0 overflow-x-auto"><Value value={value} /></dd>
               </div>
             ))}
             {solution.queries.map((value, queryIndex) => (
               <div className="flex items-center justify-between gap-4" key={`query-${queryIndex + 1}`}>
                 <dt>Query {queryIndex + 1}</dt>
-                <dd><Value value={value} /></dd>
+                <dd className="min-w-0 overflow-x-auto"><Value value={value} /></dd>
               </div>
             ))}
           </dl>
@@ -118,11 +126,7 @@ export function ResultCard({ solver, engine, onRetry }: ResultCardProps) {
     )
   } else {
     content = (
-      <Alert>
-        <Info />
-        <AlertTitle>Ready to calculate</AlertTitle>
-        <AlertDescription>Results and diagnostics will appear here.</AlertDescription>
-      </Alert>
+      <p className="text-sm text-muted-foreground">Select relations and calculate to see results.</p>
     )
   }
 
