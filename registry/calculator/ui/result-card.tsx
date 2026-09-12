@@ -1,3 +1,4 @@
+import { MathExpression } from '@/registry/calculator/ui/math'
 import { AlertCircle, CheckCircle2, Info } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -18,17 +19,12 @@ type ResultCardProps = {
 function Value({ value }: { value: DisplayValue }) {
   return (
     <span className="inline-flex flex-wrap items-center justify-end gap-2 text-base">
-      <span
-        aria-hidden="true"
-        dangerouslySetInnerHTML={{
-          __html: `<math xmlns="http://www.w3.org/1998/Math/MathML">${value.mathml}</math>`,
-        }}
-      />
+      <MathExpression aria-hidden="true" mathml={value.mathml} />
       <code className="sr-only">{value.exact}</code>
       {value.approximate ? (
         <span className="text-muted-foreground">
           {'≈ '}
-          <span dangerouslySetInnerHTML={{ __html: toMathMl({ kind: 'number', value: value.approximate }) }} />
+          <MathExpression mathml={toMathMl({ kind: 'number', value: value.approximate })} />
         </span>
       ) : null}
     </span>
@@ -53,15 +49,15 @@ function Solved({ result }: { result: Extract<SolverResult, { status: 'solved' }
             {Object.entries(solution.assignments).map(([name, value]) => (
               <div className="flex items-center justify-between gap-4" key={name}>
                 <dt className="text-base" aria-label={name}>
-                  <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: toMathMl({ kind: 'symbol', name }) }} />
+                  <MathExpression aria-hidden="true" mathml={toMathMl({ kind: 'symbol', name })} />
                 </dt>
-                <dd className="min-w-0 overflow-x-auto"><Value value={value} /></dd>
+                <dd className="min-w-0 overflow-x-auto py-1"><Value value={value} /></dd>
               </div>
             ))}
             {solution.queries.map((value, queryIndex) => (
               <div className="flex items-center justify-between gap-4" key={`query-${queryIndex + 1}`}>
                 <dt>Query {queryIndex + 1}</dt>
-                <dd className="min-w-0 overflow-x-auto"><Value value={value} /></dd>
+                <dd className="min-w-0 overflow-x-auto py-1"><Value value={value} /></dd>
               </div>
             ))}
           </dl>

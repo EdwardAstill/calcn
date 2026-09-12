@@ -1,9 +1,10 @@
+import { MathExpression } from '@/registry/calculator/ui/math'
 import type { OperationItem } from '@/registry/calculator/lib/operations'
 
 const MATH_LABELS: Record<string, string> = {
   add: '<mo>+</mo>',
   subtract: '<mo>−</mo>',
-  multiply: '<mo>⋅</mo>',
+  multiply: '<mo>×</mo>',
   divide: '<mo>÷</mo>',
   power: '<msup><mi>x</mi><mi>y</mi></msup>',
   sqrt: '<msqrt><mi>x</mi></msqrt>',
@@ -29,11 +30,14 @@ const MATH_LABELS: Record<string, string> = {
 
 export function OperationLabel({ item }: { item: OperationItem }) {
   const mathml = MATH_LABELS[item.id]
-  return mathml ? (
+  return (
     <span
-      className="text-base font-normal"
+      className={`calculator-operation-label min-w-0 font-normal ${mathml ? 'text-base' : 'text-xs leading-none whitespace-normal text-left'}`}
       aria-hidden="true"
-      dangerouslySetInnerHTML={{ __html: `<math xmlns="http://www.w3.org/1998/Math/MathML"><mrow>${mathml}</mrow></math>` }}
-    />
-  ) : item.label
+    >
+      {mathml ? (
+        <MathExpression mathml={`<mrow>${mathml}</mrow>`} />
+      ) : <span className="min-w-0 break-words">{item.label}</span>}
+    </span>
+  )
 }

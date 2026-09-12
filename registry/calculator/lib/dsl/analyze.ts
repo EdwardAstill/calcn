@@ -1,6 +1,7 @@
 import type { ExpressionAst, RelationAst } from '@/registry/calculator/lib/dsl/ast'
 
 const CALCULUS_BINDING_INDEX = new Map([
+  ...['grad', 'jacobian', 'div', 'curl', 'hessian'].map(name => [name, 1] as const),
   ['diff', 1],
   ['integrate', 1],
   ['limit', 1],
@@ -11,6 +12,12 @@ export function collectFreeSymbols(expression: ExpressionAst): Set<string> {
 
   function visit(node: ExpressionAst): void {
     switch (node.kind) {
+      case 'array':
+        node.items.forEach(visit)
+        return
+      case 'comparison':
+        node.operands.forEach(visit)
+        return
       case 'number':
       case 'constant':
         return

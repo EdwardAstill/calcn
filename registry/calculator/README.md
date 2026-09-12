@@ -1,6 +1,6 @@
 # Calculator
 
-A standalone scientific calculator extracted from `edcn`, with native MathML
+A standalone scientific calculator extracted from `edcn`, with MathJax
 previews, symbolic algebra and calculus, and a shared-equation workspace.
 
 ## Install
@@ -20,7 +20,9 @@ export default function Example() {
 ```
 
 Uses the shared shadcn Base UI controls declared in `registryDependencies` and
-your application's theme. No calculator-specific stylesheet is required.
+your application's theme. The component renders MathML through `better-react-mathjax`, loading MathJax 4
+and its fonts from jsDelivr on first use. Math rendering requires network access
+on first load. Its provider and math stylesheet are included automatically.
 The Python solver starts when the component mounts and downloads Pyodide
 314.0.6 and SymPy from jsDelivr. Initial startup needs network access; subsequent
 calculations reuse the worker. The worker is bundled into a module Blob.
@@ -59,3 +61,57 @@ After changing `lib/help.md`, `lib/solver/solver.py`, or the worker source, run
 
 The optional `solverClient` prop accepts a `SolverClient` for embedding or tests;
 otherwise the component creates and disposes its own worker-backed client.
+
+## Probability
+
+Distributions are part of the shared Relations workspace. For example:
+
+```text
+X = Norm(0, 1)
+P(-1 < X < 1)
+E(X)
+Var(X)
+quantile(X, 0.95)
+Y = Pois(4)
+P(Y = 3)
+W = Weib(2, 5)
+P(W > 10)
+```
+
+Supported constructors: `Norm(mean, variance)` / `N(mean, variance)`,
+`Pois(rate)`, `Bin(trials, probability)`, `Bern(probability)`,
+`Unif(lower, upper)`, `Exp(rate)`, `Weib(shape, scale)`, `Gamma(shape, scale)`,
+`Beta(alpha, beta)`, `T(degrees)`, `Chi2(degrees)`, and `F(degrees1, degrees2)`.
+Distribution names are case-sensitive (`Exp` differs from arithmetic `exp`).
+The second Normal parameter is **variance**, not standard deviation.
+
+Tick declarations to plot densities or probability masses in the existing Plot
+tab. Tick probability queries to highlight their events. Referenced definitions
+must also be enabled. Numeric parameter definitions may appear in any row order.
+Plots start at a distribution-specific range; Reset view restores it.
+Discrete and continuous distributions cannot share a vertical axis.
+
+Probability calculations use bundled jStat numerical functions and do not need
+Python when all selected rows are declarations and numeric queries. Algebra and
+calculus continue to use SymPy. Probability values are approximate. One random
+variable and its affine transformations are supported per event; different
+variables do not silently become independent. General nonlinear transformations,
+fitting, and solving probability constraints for unknowns are not implemented.
+Use `quantile` for inverse cumulative probabilities.
+
+The expression input offers grey function completions. Tab or Right Arrow inserts
+the function name and opening parenthesis; Escape dismisses it. Parameter hints
+also cover differentiation, integration, limits, and existing scientific functions.
+
+### Vectors, matrices, and multivariable calculus
+
+Vectors use `[1,2,3]` (column convention); matrices use `[[1,2],[3,4]]` (rows).
+Named definitions support exact symbolic entries, dimension-checked arithmetic,
+`dot`, `cross`, `norm`, `unit`, `transpose`, `det`, `inv`, `trace`, `rank`, and
+`linsolve(A,b)`. Matrix powers accept integer exponents on square matrices.
+Calculus operates componentwise; `grad`, `jacobian`, `div`, `curl`, and `hessian`
+accept an explicit variable vector. Selected 2D vectors plot as arrows, and
+one-parameter two-component expressions plot over −10 to 10. See Help for limits.
+
+Run the Python adapter regression tests with a SymPy-enabled Python environment:
+`uv run --with sympy python tests/solver_matrix_test.py`.

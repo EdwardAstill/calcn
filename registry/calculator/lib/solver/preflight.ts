@@ -1,5 +1,6 @@
+import { hasProbability } from '@/registry/calculator/lib/probability'
 import { collectEquationSymbols } from '@/registry/calculator/lib/dsl/analyze'
-import type { RelationAst } from '@/registry/calculator/lib/dsl/ast'
+import { hasMatrixValues, type RelationAst } from '@/registry/calculator/lib/dsl/ast'
 
 export type PreflightResult =
   | { ok: true; equationCount: number; variableCount: number }
@@ -17,7 +18,7 @@ export function preflight(relations: RelationAst[]): PreflightResult {
   ).length
   const variableCount = collectEquationSymbols(relations).length
 
-  if (equationCount > variableCount) {
+  if (!hasProbability(relations) && !hasMatrixValues(relations) && equationCount > variableCount) {
     return {
       ok: false,
       status: 'overdefined',

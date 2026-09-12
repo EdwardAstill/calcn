@@ -1,3 +1,5 @@
+import { hasProbability, prepareProbability } from '@/registry/calculator/lib/probability'
+import { preflight } from '@/registry/calculator/lib/solver/preflight'
 import type { RelationAst } from '@/registry/calculator/lib/dsl/ast'
 import { SOLVER_WORKER_SOURCE } from '@/registry/calculator/lib/generated/solver-worker-source'
 import type {
@@ -130,6 +132,19 @@ export function createSolverClient(
           worker = null
         }
       }
+      let finish = (result: SolverResult) => result
+      if (hasProbability(relations)) {
+        try {
+          const prepared = prepareProbability(relations)
+          if (prepared.result) return Promise.resolve(prepared.result)
+          relations = prepared.relations
+          finish = prepared.finish
+          const validation = preflight(relations)
+          if (!validation.ok) return Promise.resolve({ ...validation, status: 'overdefined' } as SolverResult)
+        } catch (error) {
+          return Promise.resolve({ status: 'unsupported', message: error instanceof Error ? error.message : 'Unable to evaluate probability.' } as SolverResult)
+        }
+      }
       if (snapshot.phase === 'failed') {
         worker?.terminate()
         worker = null
@@ -141,7 +156,7 @@ export function createSolverClient(
         mode,
       }
       const promise = new Promise<SolverResult>((resolve) => {
-        active = { request, resolve, posted: false }
+        active = { request, resolve: result => resolve(finish(result)), posted: false }
       })
       if (!worker) startWorker()
       if (!active || active.request.id !== request.id) return promise

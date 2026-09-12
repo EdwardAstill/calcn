@@ -59,11 +59,17 @@ function renderCall(name: BuiltinFunction, args: ExpressionAst[]): string {
     return `\\operatorname{${name}}${group(renderedArgs[0])}`
   }
   const command = NAMED_FUNCTIONS[name]
-  return `\\${command ?? name}${group(renderedArgs[0])}`
+  return `${command ? `\\${command}` : `\\operatorname{${name}}`}${group(renderedArgs.join(', '))}`
 }
 
 function render(expression: ExpressionAst): Rendered {
   switch (expression.kind) {
+    case 'array': {
+      const rows = expression.items[0]?.kind === 'array' ? expression.items.map(item => item.kind === 'array' ? item.items : [item]) : expression.items.map(item => [item])
+      return { latex: `\\begin{bmatrix}${rows.map(items => items.map(item => render(item).latex).join(' & ')).join(' \\\\ ')}\\end{bmatrix}`, precedence: PRECEDENCE.atom }
+    }
+    case 'comparison':
+      return { latex: expression.operands.map((operand, index) => `${index ? ({ '<=': '\\le', '>=': '\\ge', '!=': '\\ne' } as Record<string, string>)[expression.operators[index - 1]!] ?? expression.operators[index - 1] : ''} ${render(operand).latex}`).join(' ').trim(), precedence: 0 }
     case 'number':
       return { latex: expression.value, precedence: PRECEDENCE.atom }
     case 'symbol':

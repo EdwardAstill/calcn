@@ -1,5 +1,11 @@
 'use client'
 
+import '@/registry/calculator/ui/math.css'
+
+import { hasMatrixValues } from '@/registry/calculator/lib/dsl/ast'
+
+import { completeFunction, functionHint } from '@/registry/calculator/lib/completion'
+import { hasProbability } from '@/registry/calculator/lib/probability'
 import {
   BookOpen,
   Calculator,
@@ -27,7 +33,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -47,9 +52,11 @@ import {
   FieldSet,
 } from '@/components/ui/field'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
+import { Kbd } from '@/components/ui/kbd'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+import { CalculatorMathProvider, MathExpression } from '@/registry/calculator/ui/math'
 import { OperationLabel } from '@/registry/calculator/ui/operation-label'
 import { RelationPlot } from '@/registry/calculator/ui/relation-plot'
 import { ResultCard } from '@/registry/calculator/ui/result-card'
@@ -94,11 +101,26 @@ function parseEditor(source: string): EditorParseState {
   }
 }
 
-export function ScientificCalculator({ solverClient }: ScientificCalculatorProps) {
+export function ScientificCalculator(props: ScientificCalculatorProps) {
+  return (
+    <CalculatorMathProvider>
+      <CalculatorWorkspace {...props} />
+    </CalculatorMathProvider>
+  )
+}
+
+function CalculatorWorkspace({ solverClient }: ScientificCalculatorProps) {
   const client = useMemo(() => solverClient ?? createSolverClient(), [solverClient])
   const [state, dispatch] = useReducer(calculatorReducer, initialCalculatorState)
   const [activeTab, setActiveTab] = useState('calculator')
-  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [operationGroup, setOperationGroup] = useState<string>(OPERATION_GROUPS[0].name)
+  const [pendingGroup, setPendingGroup] = useState<string | null>(null)
+  const calculatorTabRef = useRef<HTMLButtonElement>(null)
+  const plotTabRef = useRef<HTMLButtonElement>(null)
+  const relationsTabRef = useRef<HTMLButtonElement>(null)
+  const operationTabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const shortcutFocusFrame = useRef(0)
+  const [relationsTab, setRelationsTab] = useState('relations')
   const [selectedEquations, setSelectedEquations] = useState<Set<typeof LIBRARY_EQUATIONS[number]>>(new Set())
   const libraryTabRef = useRef<HTMLButtonElement>(null)
   const editorRef = useRef<HTMLInputElement>(null)
@@ -106,6 +128,12 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
   const relationSequence = useRef(0)
   const requestSequence = useRef(0)
   const parsed = useMemo(() => parseEditor(state.source), [state.source])
+  const [caret, setCaret] = useState(0)
+  const [editorFocused, setEditorFocused] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
+  const [editorScroll, setEditorScroll] = useState(0)
+  const completion = editorFocused && !dismissed ? completeFunction(state.source, caret) : null
+  const hint = functionHint(state.source, caret)
   const [preview, setPreview] = useState('')
   const [editorError, setEditorError] = useState<string | null>(null)
   const engine = useSyncExternalStore(
@@ -131,22 +159,16 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
     const focusEditor = () => {
       setActiveTab('calculator')
       dispatch({ type: 'help-changed', open: false })
-      setLibraryOpen(false)
+      setRelationsTab('relations')
       cancelAnimationFrame(focusFrame)
       focusFrame = requestAnimationFrame(() => editorRef.current?.focus())
     }
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return
-      event.preventDefault()
-      focusEditor()
-    }
     focusEditor()
     window.addEventListener('focus', focusEditor)
-    window.addEventListener('keydown', onEscape, true)
     return () => {
       cancelAnimationFrame(focusFrame)
       window.removeEventListener('focus', focusEditor)
-      window.removeEventListener('keydown', onEscape, true)
+      cancelAnimationFrame(shortcutFocusFrame.current)
     }
   }, [])
 
@@ -167,21 +189,21 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
     queueMicrotask(() => editorRef.current?.focus())
   }
 
-  function addLibraryEquations() {
-    const relations = LIBRARY_EQUATIONS
-      .filter((equation) => selectedEquations.has(equation))
-      .map((equation) => {
-        relationSequence.current += 1
-        return {
-          id: `relation-${relationSequence.current}`,
-          source: equation.source,
-          ast: equation.ast,
-          createdAt: relationSequence.current,
-          enabled: true,
-        }
-      })
+  function addLibraryEquations(equations = LIBRARY_EQUATIONS.filter((equation) => selectedEquations.has(equation))) {
+    const relations = equations.map((equation) => {
+      relationSequence.current += 1
+      return {
+        id: `relation-${relationSequence.current}`,
+        source: equation.source,
+        ast: equation.ast,
+        createdAt: relationSequence.current,
+        enabled: true,
+      }
+    })
     dispatch({ type: 'library-added', relations })
-    setLibraryOpen(false)
+    setSelectedEquations(new Set())
+    setRelationsTab('relations')
+    requestAnimationFrame(() => relationsTabRef.current?.focus())
   }
 
   function insertOperation(template: string) {
@@ -195,16 +217,100 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
       template,
     )
     dispatch({ type: 'source-changed', source: insertion.source })
-    queueMicrotask(() => {
+    cancelAnimationFrame(shortcutFocusFrame.current)
+    shortcutFocusFrame.current = requestAnimationFrame(() => {
       editorRef.current?.focus()
       editorRef.current?.setSelectionRange(insertion.selection.start, insertion.selection.end)
     })
   }
 
+  function handleShortcuts(event: KeyboardEvent) {
+    if (event.isComposing || event.repeat) return
+    const key = event.key.toLowerCase()
+    const target = event.target as HTMLElement
+    const editing = target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+
+    if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && ['c', 'p', 'r', 'l'].includes(key)) {
+      // Keep the familiar copy shortcut when text is selected.
+      if (key === 'c' && (
+        window.getSelection()?.toString() ||
+        ((target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && target.selectionStart !== target.selectionEnd)
+      )) return
+      event.preventDefault()
+      event.stopPropagation()
+      cancelAnimationFrame(shortcutFocusFrame.current)
+      setPendingGroup(null)
+      dispatch({ type: 'help-changed', open: false })
+      if (key === 'c') setActiveTab('calculator')
+      if (key === 'p') setActiveTab('plot')
+      if (key === 'r') setRelationsTab('relations')
+      if (key === 'l') setRelationsTab('library')
+      shortcutFocusFrame.current = requestAnimationFrame(() => {
+        const tab = key === 'c' ? calculatorTabRef.current
+          : key === 'p' ? plotTabRef.current
+          : key === 'l' ? libraryTabRef.current : relationsTabRef.current
+        tab?.focus()
+        tab?.scrollIntoView({ block: 'nearest' })
+      })
+      return
+    }
+
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+    if (key === 'escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      cancelAnimationFrame(shortcutFocusFrame.current)
+      setPendingGroup(null)
+      if (target === editorRef.current) {
+        const group = OPERATION_GROUPS.find(group => group.name === operationGroup)!
+        operationTabRefs.current[group.shortcut]?.focus()
+      } else {
+        setActiveTab('calculator')
+        dispatch({ type: 'help-changed', open: false })
+        setRelationsTab('relations')
+        shortcutFocusFrame.current = requestAnimationFrame(() => editorRef.current?.focus())
+      }
+      return
+    }
+    if (editing || target.closest('[role="dialog"], [role="menu"]')) {
+      if (pendingGroup) setPendingGroup(null)
+      return
+    }
+    if (pendingGroup) {
+      const group = OPERATION_GROUPS.find(group => group.shortcut === pendingGroup)!
+      const item = group.items.find(item => item.shortcut === key)
+      setPendingGroup(null)
+      if (item) {
+        event.preventDefault()
+        event.stopPropagation()
+        insertOperation(item.template)
+      }
+      return
+    }
+    const group = OPERATION_GROUPS.find(group => group.shortcut === key)
+    if (group) {
+      event.preventDefault()
+      event.stopPropagation()
+      setActiveTab('calculator')
+      setOperationGroup(group.name)
+      setPendingGroup(group.shortcut)
+      cancelAnimationFrame(shortcutFocusFrame.current)
+      shortcutFocusFrame.current = requestAnimationFrame(() => operationTabRefs.current[group.shortcut]?.focus())
+    }
+  }
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleShortcuts, true)
+    return () => window.removeEventListener('keydown', handleShortcuts, true)
+  })
+
   async function solveRelations(
     relations: RelationAst[],
     mode: SolverMode = 'system',
   ) {
+    if (mode === 'symbolic' && (hasProbability(relations) || hasMatrixValues([...relations, ...state.relations.filter(row => row.enabled).map(row => row.ast)]))) {
+      relations = [...state.relations.filter(row => row.enabled && row.ast.kind === 'equation' && row.ast.left.kind === 'symbol' && !relations.includes(row.ast)).map(row => row.ast), ...relations]
+    }
     if (relations.length === 0) {
       dispatch({
         type: 'local-diagnostic',
@@ -252,18 +358,19 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
 
   return (
     <section
-      className="mx-auto w-full max-w-7xl p-4 sm:p-6"
+      className="calculator-math mx-auto w-full max-w-7xl p-4 sm:p-6"
       aria-label="Scientific calculator workspace"
+      onPointerDownCapture={() => { setPendingGroup(null); cancelAnimationFrame(shortcutFocusFrame.current) }}
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <TabsList aria-label="Workspace tool">
-              <TabsTrigger value="calculator">
-                <Calculator /> Calculator
+              <TabsTrigger value="calculator" ref={calculatorTabRef} aria-label="Calculator" aria-keyshortcuts="Control+c">
+                <Calculator /> Calculator <Kbd aria-hidden="true">Ctrl C</Kbd>
               </TabsTrigger>
-              <TabsTrigger value="plot">
-                <ChartNoAxesColumn /> Plot
+              <TabsTrigger value="plot" ref={plotTabRef} aria-label="Plot" aria-keyshortcuts="Control+p">
+                <ChartNoAxesColumn /> Plot <Kbd aria-hidden="true">Ctrl P</Kbd>
               </TabsTrigger>
             </TabsList>
             {state.editingId ? <Badge variant="secondary">Editing</Badge> : null}
@@ -283,21 +390,47 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
               <FieldLabel htmlFor="calculator-expression">Expression</FieldLabel>
               <div className="flex items-center gap-2">
                 <InputGroup>
-                  <InputGroupInput
-                    ref={editorRef}
-                    id="calculator-expression"
-                    aria-label="Calculator expression"
-                    value={state.source}
-                    aria-invalid={Boolean(editorError)}
-                    placeholder="2x + 3 = 7"
-                    onChange={(event) => dispatch({ type: 'source-changed', source: event.target.value })}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                        event.preventDefault()
-                        if (!event.repeat) saveRelation()
-                      }
-                    }}
-                  />
+                  <div className="relative min-w-0 flex-1 font-mono text-base md:text-sm">
+                    <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center pl-2.5 pr-1.5">
+                      <div className="w-full overflow-hidden">
+                        {completion && <span className="block whitespace-pre" style={{ transform: `translateX(-${editorScroll}px)` }}><span className="invisible">{state.source}</span><span className="text-muted-foreground/60">{completion.suffix}</span></span>}
+                      </div>
+                    </div>
+                    <InputGroupInput
+                      className="font-mono pr-1.5"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-autocomplete="inline"
+                      aria-describedby="calculator-function-hint"
+                      onFocus={() => setEditorFocused(true)}
+                      onBlur={() => setEditorFocused(false)}
+                      onSelect={event => { setCaret(event.currentTarget.selectionStart === event.currentTarget.selectionEnd ? event.currentTarget.selectionStart ?? 0 : -1) }}
+                      onScroll={event => setEditorScroll(event.currentTarget.scrollLeft)}
+                      ref={editorRef}
+                      id="calculator-expression"
+                      aria-label="Calculator expression"
+                      value={state.source}
+                      aria-invalid={Boolean(editorError)}
+                      placeholder="2x + 3 = 7"
+                      onChange={(event) => { dispatch({ type: 'source-changed', source: event.target.value }); setCaret(event.target.selectionStart ?? 0); setDismissed(false) }}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return
+                        if (event.key === 'Escape') setDismissed(true)
+                        if ((event.key === 'Tab' || event.key === 'ArrowRight') && completion && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                          event.preventDefault()
+                          const source = state.source.slice(0, completion.replaceFrom) + completion.insertion
+                          dispatch({ type: 'source-changed', source })
+                          setCaret(source.length)
+                          requestAnimationFrame(() => editorRef.current?.setSelectionRange(source.length, source.length))
+                          return
+                        }
+                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                          event.preventDefault()
+                          if (!event.repeat) saveRelation()
+                        }
+                      }}
+                    />
+                  </div>
                   <InputGroupAddon align="inline-end">
                     <InputGroupButton
                       size="icon-xs"
@@ -320,46 +453,55 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
                   <Plus /> {state.editingId ? 'Save' : 'Add'}
                 </Button>
               </div>
+              <p id="calculator-function-hint" className="min-h-4 text-xs text-muted-foreground" aria-live="polite">{completion ? `${completion.signature} · Tab or → to complete` : hint ?? 'Type a function for hints, including diff, Norm and P.'}</p>
               {editorError ? <FieldError>{editorError}</FieldError> : null}
             </Field>
 
             <div className="flex min-h-20 min-w-0 items-center justify-center rounded-md bg-muted/50 p-4" aria-label="Rendered math preview">
-              <div className="max-w-full overflow-x-auto text-base">
+              <div className="max-w-full overflow-x-auto py-1 text-xl">
                 {preview ? (
-                  <span dangerouslySetInnerHTML={{ __html: preview }} />
+                  <MathExpression mathml={preview} />
                 ) : (
                   <span className="text-sm text-muted-foreground">Your expression preview</span>
                 )}
               </div>
             </div>
 
-            <Tabs defaultValue={OPERATION_GROUPS[0].name}>
-              <div className="overflow-x-auto pb-1">
-                <TabsList variant="line" aria-label="Operations">
+            <Tabs value={operationGroup} onValueChange={value => { setOperationGroup(value); setPendingGroup(null) }}>
+              <div className="pb-1">
+                <TabsList aria-label="Operations" className="max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto" activateOnFocus={false}>
                   {OPERATION_GROUPS.map((group) => (
-                    <TabsTrigger key={group.name} value={group.name}>{group.name}</TabsTrigger>
+                    <TabsTrigger key={group.name} value={group.name} ref={element => { operationTabRefs.current[group.shortcut] = element }} aria-label={group.name} aria-keyshortcuts={group.shortcut}>
+                      {group.name} <Kbd aria-hidden="true">{group.shortcut.toUpperCase()}</Kbd>
+                    </TabsTrigger>
                   ))}
                 </TabsList>
               </div>
               {OPERATION_GROUPS.map((group) => (
                 <TabsContent key={group.name} value={group.name}>
-                  <div className={`grid gap-2 ${group.items.length <= 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
+                  <div className="grid grid-cols-4 gap-2">
                     {group.items.map((item) => (
                       <Button
                         key={item.id}
                         type="button"
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
+                        className="h-11 min-w-0 justify-between gap-2 px-2"
                         aria-label={item.label}
+                        aria-description={`Keyboard shortcut: ${group.shortcut.toUpperCase()} then ${item.shortcut.toUpperCase()}`}
                         onClick={() => insertOperation(item.template)}
                       >
                         <OperationLabel item={item} />
+                        <Kbd className="ml-auto shrink-0" aria-hidden="true">{item.shortcut.toUpperCase()}</Kbd>
                       </Button>
                     ))}
                   </div>
                 </TabsContent>
               ))}
             </Tabs>
+            <p className="text-xs text-muted-foreground" role="status">
+              {pendingGroup ? `${pendingGroup.toUpperCase()} … Press an operation key, or Escape to return to the expression.` : 'Escape toggles between the expression and keyboard shortcuts.'}
+            </p>
           </TabsContent>
           <TabsContent value="plot" className="min-w-0 overflow-hidden">
             {activeTab === 'plot' ? <RelationPlot relations={state.relations} /> : null}
@@ -370,25 +512,26 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
         <Separator className="lg:hidden" />
 
         <Tabs
-          value="relations"
-          onValueChange={(value) => {
-            if (value === 'library') {
-              setSelectedEquations(new Set())
-              setLibraryOpen(true)
-            }
-          }}
+          value={relationsTab}
+          onValueChange={setRelationsTab}
           className="min-w-0 gap-4"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <TabsList aria-label="Relations tools" activateOnFocus={false}>
-              <TabsTrigger value="relations">Relations</TabsTrigger>
-              <TabsTrigger value="library" ref={libraryTabRef} aria-haspopup="dialog">
-                <BookOpen /> Library
+              <TabsTrigger value="relations" ref={relationsTabRef} aria-label="Relations" aria-keyshortcuts="Control+r">Relations <Kbd aria-hidden="true">Ctrl R</Kbd></TabsTrigger>
+              <TabsTrigger value="library" ref={libraryTabRef} aria-label="Library" aria-keyshortcuts="Control+l">
+                <BookOpen /> Library <Kbd aria-hidden="true">Ctrl L</Kbd>
               </TabsTrigger>
             </TabsList>
-            <Button size="sm" onClick={() => void calculate()} disabled={state.solver.phase === 'loading'}>
-              <Calculator /> Calculate
-            </Button>
+            {relationsTab === 'relations' ? (
+              <Button size="sm" onClick={() => void calculate()} disabled={state.solver.phase === 'loading'}>
+                <Calculator /> Calculate
+              </Button>
+            ) : (
+              <Button size="sm" disabled={selectedEquations.size === 0} onClick={() => addLibraryEquations()}>
+                <Plus /> Add selected{selectedEquations.size > 0 ? ` (${selectedEquations.size})` : ''}
+              </Button>
+            )}
           </div>
           <TabsContent value="relations" className="grid content-start gap-4">
             <div className="divide-y rounded-lg border">
@@ -410,7 +553,7 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
                     className={`min-w-0 flex-1 overflow-x-auto py-1 text-base ${relation.enabled ? '' : 'text-muted-foreground'}`}
                     aria-label={relation.source}
                   >
-                    <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: relationToMathMl(relation.ast) }} />
+                    <MathExpression aria-hidden="true" mathml={relationToMathMl(relation.ast)} />
                   </span>
                   <DropdownMenu>
                     <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${relation.source}`} />}>
@@ -451,58 +594,58 @@ export function ScientificCalculator({ solverClient }: ScientificCalculatorProps
             <Separator />
             <ResultCard solver={state.solver} engine={engine} onRetry={() => client.retry()} />
           </TabsContent>
+          <TabsContent value="library" className="grid min-w-0 content-start gap-4">
+            <p className="text-muted-foreground">Select individual equations or add a whole set to your relations.</p>
+            <div className="grid min-w-0 gap-5">
+              {LIBRARY_EQUATIONS.length === 0 ? (
+                <p className="text-muted-foreground">No equations in the library yet.</p>
+              ) : EQUATION_LIBRARY.map((file) => (
+                <div key={file.file} className="grid min-w-0 gap-3">
+                  <h3 className="text-sm font-medium text-muted-foreground">{file.file}</h3>
+                  {file.groups.map((group, groupIndex) => (
+                    <FieldSet key={groupIndex} className="min-w-0 gap-2">
+                      <FieldLegend variant="label" className="w-full">
+                        <span className="flex items-center justify-between gap-2">
+                          <span>{group.title}</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Add ${group.title} set from ${file.file}`}
+                            onClick={() => addLibraryEquations(group.equations)}
+                          >
+                            <Plus /> Add set
+                          </Button>
+                        </span>
+                      </FieldLegend>
+                      {group.equations.map((equation, equationIndex) => (
+                        <FieldLabel key={equationIndex}>
+                          <Field orientation="horizontal">
+                            <Checkbox
+                              checked={selectedEquations.has(equation)}
+                              aria-label={equation.source}
+                              onCheckedChange={(checked) => setSelectedEquations((previous) => {
+                                const next = new Set(previous)
+                                if (checked) next.add(equation)
+                                else next.delete(equation)
+                                return next
+                              })}
+                            />
+                            <MathExpression
+                              className="min-w-0 py-1 text-base font-normal"
+                              aria-hidden="true"
+                              mathml={relationToMathMl(equation.ast)}
+                            />
+                          </Field>
+                        </FieldLabel>
+                      ))}
+                    </FieldSet>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
-
-      <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
-        <DialogContent finalFocus={libraryTabRef} className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Equation library</DialogTitle>
-            <DialogDescription>Select equations to add to your relations.</DialogDescription>
-          </DialogHeader>
-          <div className="grid max-h-[60dvh] min-h-0 gap-5 overflow-y-auto">
-            {LIBRARY_EQUATIONS.length === 0 ? (
-              <p className="text-muted-foreground">No equations in the library yet.</p>
-            ) : EQUATION_LIBRARY.map((file) => (
-              <div key={file.file} className="grid gap-3">
-                <h3 className="text-sm font-medium text-muted-foreground">{file.file}</h3>
-                {file.groups.map((group, groupIndex) => (
-                  <FieldSet key={groupIndex} className="min-w-0 gap-2">
-                    <FieldLegend variant="label">{group.title}</FieldLegend>
-                    {group.equations.map((equation, equationIndex) => (
-                      <FieldLabel key={equationIndex}>
-                        <Field orientation="horizontal">
-                          <Checkbox
-                            checked={selectedEquations.has(equation)}
-                            aria-label={equation.source}
-                            onCheckedChange={(checked) => setSelectedEquations((previous) => {
-                              const next = new Set(previous)
-                              if (checked) next.add(equation)
-                              else next.delete(equation)
-                              return next
-                            })}
-                          />
-                          <span
-                            className="min-w-0 overflow-x-auto text-base font-normal"
-                            aria-hidden="true"
-                            dangerouslySetInnerHTML={{ __html: relationToMathMl(equation.ast) }}
-                          />
-                        </Field>
-                      </FieldLabel>
-                    ))}
-                  </FieldSet>
-                ))}
-              </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLibraryOpen(false)}>Cancel</Button>
-            <Button disabled={selectedEquations.size === 0} onClick={addLibraryEquations}>
-              <Plus /> Add selected{selectedEquations.size > 0 ? ` (${selectedEquations.size})` : ''}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={state.helpOpen}

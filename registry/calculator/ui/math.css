@@ -1,0 +1,8 @@
+.calculator-math mjx-container {
+  margin: 0;
+}
+
+.calculator-operation-label {
+  display: inline-flex;
+  align-items: center;
+}

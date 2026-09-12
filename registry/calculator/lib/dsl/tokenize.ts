@@ -7,11 +7,14 @@ export type TokenKind =
   | 'slash'
   | 'caret'
   | 'bang'
+  | 'lbracket'
+  | 'rbracket'
   | 'lparen'
   | 'rparen'
   | 'lbrace'
   | 'rbrace'
   | 'comma'
+  | 'comparison'
   | 'equals'
   | 'eof'
 
@@ -41,6 +44,8 @@ const SINGLE_TOKENS: Record<string, TokenKind> = {
   '/': 'slash',
   '^': 'caret',
   '!': 'bang',
+  '[': 'lbracket',
+  ']': 'rbracket',
   '(': 'lparen',
   ')': 'rparen',
   '{': 'lbrace',
@@ -96,6 +101,14 @@ export function tokenize(source: string): Token[] {
     const character = source[index]
     if (/\s/u.test(character)) {
       index += 1
+      continue
+    }
+
+    if (['<', '>', '≤', '≥', '≠'].includes(character) || (character === '!' && source[index + 1] === '=')) {
+      const end = index + (source[index + 1] === '=' ? 2 : 1)
+      const text = ({ '≤': '<=', '≥': '>=', '≠': '!=' } as Record<string, string>)[character] ?? source.slice(index, end)
+      tokens.push({ kind: 'comparison', text, start: index, end })
+      index = end
       continue
     }
 

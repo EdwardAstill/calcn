@@ -8,11 +8,14 @@
       "title": "Scientific Calculator",
       "description": "A shadcn Base UI scientific calculator backed by a Pyodide and SymPy solver.",
       "dependencies": [
+        "better-react-mathjax@3.0.2",
         "lucide-react",
         "pyodide@314.0.6",
-        "recharts@3.8.0"
+        "recharts@3.8.0",
+        "jstat@1.9.6"
       ],
       "registryDependencies": [
+        "kbd",
         "alert",
         "badge",
         "button",
@@ -30,6 +33,16 @@
         "chart"
       ],
       "files": [
+        {
+          "path": "registry/calculator/ui/math.tsx",
+          "type": "registry:ui",
+          "target": "@ui/calculator/math.tsx"
+        },
+        {
+          "path": "registry/calculator/ui/math.css",
+          "type": "registry:file",
+          "target": "@ui/calculator/math.css"
+        },
         {
           "path": "registry/calculator/ui/operation-label.tsx",
           "type": "registry:ui",
@@ -159,6 +172,26 @@
           "path": "registry/calculator/ui/plot-interaction.tsx",
           "type": "registry:ui",
           "target": "@ui/calculator/plot-interaction.tsx"
+        },
+        {
+          "path": "registry/calculator/lib/distributions.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/distributions.ts"
+        },
+        {
+          "path": "registry/calculator/lib/probability.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/probability.ts"
+        },
+        {
+          "path": "registry/calculator/lib/probability-plot.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/probability-plot.ts"
+        },
+        {
+          "path": "registry/calculator/lib/completion.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/completion.ts"
         }
       ],
       "type": "registry:block"

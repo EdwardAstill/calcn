@@ -50,7 +50,7 @@ function wrapped(rendered: Rendered, minimumPrecedence: number): string {
 }
 
 function applyFunction(label: string, argument: string): string {
-  return row(identifier(label), operator('&#x2061;'), group(argument))
+  return row(`<mi mathvariant="normal">${escapeXml(label)}</mi>`, operator('&#x2061;'), group(argument))
 }
 
 function renderCall(name: BuiltinFunction, args: ExpressionAst[]): string {
@@ -85,11 +85,17 @@ function renderCall(name: BuiltinFunction, args: ExpressionAst[]): string {
       group(renderedArgs[0]),
     )
   }
-  return applyFunction(FUNCTION_LABELS[name] ?? name, renderedArgs[0])
+  return applyFunction(FUNCTION_LABELS[name] ?? name, renderedArgs.join(operator(',')))
 }
 
 function render(expression: ExpressionAst): Rendered {
   switch (expression.kind) {
+    case 'array': {
+      const rows = expression.items[0]?.kind === 'array' ? expression.items.map(item => item.kind === 'array' ? item.items : [item]) : expression.items.map(item => [item])
+      return { mathml: row(operator('['), `<mtable>${rows.map(items => `<mtr>${items.map(item => `<mtd>${render(item).mathml}</mtd>`).join('')}</mtr>`).join('')}</mtable>`, operator(']')), precedence: PRECEDENCE.atom }
+    }
+    case 'comparison':
+      return { mathml: row(...expression.operands.flatMap((operand, index) => index === 0 ? [render(operand).mathml] : [operator(escapeXml(expression.operators[index - 1]!)), render(operand).mathml])), precedence: 0 }
     case 'number':
       return {
         mathml: `<mn>${escapeXml(expression.value)}</mn>`,

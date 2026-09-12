@@ -26,9 +26,11 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "better-react-mathjax": "^3.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.2.5",
+    "jstat": "^1.9.6",
     "lucide-react": "^0.487.0",
     "pyodide": "^314.0.6",
     "react": "19.1.0",
@@ -54,20 +56,31 @@
   "build": {
     "appId": "com.edwardastill.calcn",
     "productName": "calcn",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "electron/main.mjs",
       "dist/**/*.html",
       "dist/**/*.js",
       "dist/**/*.css",
+      "dist/**/*.woff2",
       "dist/r/*.json",
       "package.json",
       "!node_modules/**/*"
     ],
     "npmRebuild": false,
-    "linux": { "target": "AppImage", "category": "Education" },
-    "mac": { "target": "dmg", "category": "public.app-category.education" },
-    "win": { "target": "nsis" }
+    "linux": {
+      "target": "AppImage",
+      "category": "Education"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": "nsis"
+    }
   },
   "overrides": {
     "@types/react": "19.1.2",

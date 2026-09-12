@@ -30,6 +30,7 @@ SYMBOLIC_QUERY_OPERATIONS = {
     "diff",
     "integrate",
     "limit",
+    "grad", "jacobian", "div", "curl", "hessian",
 }
 
 CALCULUS_BINDING_INDEX = {"diff": 1, "integrate": 1, "limit": 1}
@@ -37,6 +38,10 @@ CALCULUS_BINDING_INDEX = {"diff": 1, "integrate": 1, "limit": 1}
 
 def _collect_symbols(node, names):
     kind = node.get("kind") if isinstance(node, dict) else None
+    if kind == "array":
+        for item in node["items"]:
+            _collect_symbols(item, names)
+        return
     if kind == "symbol":
         names.add(str(node["name"]).lower())
         return
@@ -82,7 +87,26 @@ def _require_symbol(value, operation):
 
 
 def _build_allowed_call(name, raw_args, symbols):
-    args = [build_expr(argument, symbols) for argument in raw_args]
+    binding = 1 if name in {"diff", "integrate", "limit", "grad", "jacobian", "div", "curl", "hessian"} else None
+    scope = symbols
+    bound = set()
+    if binding is not None and len(raw_args) > binding:
+        _collect_symbols(raw_args[binding], bound)
+        if hasattr(symbols, "without"):
+            scope = symbols.without(bound)
+    args = [build_expr(argument, {} if index == binding else scope) for index, argument in enumerate(raw_args)]
+    result = _apply_allowed_call(name, args)
+    if scope is not symbols and name != "limit":
+        substitutions = {sp.Symbol(key, real=True): symbols.setdefault(key, sp.Symbol(key, real=True)) for key in bound}
+        if any(isinstance(value, sp.MatrixBase) for value in substitutions.values()):
+            raise UnsupportedFeature("Calculus variables must have scalar values")
+        result = result.subs(substitutions, simultaneous=True)
+    return result
+
+
+def _apply_allowed_call(name, args):
+    if name in {"dot", "cross", "norm", "unit", "transpose", "det", "inv", "trace", "rank", "linsolve", "grad", "jacobian", "div", "curl", "hessian"}:
+        return _matrix_call(name, args)
     unary_calls = {
         "sqrt": sp.sqrt,
         "abs": sp.Abs,
@@ -111,7 +135,8 @@ def _build_allowed_call(name, raw_args, symbols):
     if name == "integrate" and len(args) == 2:
         return sp.integrate(args[0], _require_symbol(args[1], name))
     if name == "limit" and len(args) == 3:
-        return sp.limit(args[0], _require_symbol(args[1], name), args[2])
+        variable = _require_symbol(args[1], name)
+        return args[0].applyfunc(lambda entry: sp.limit(entry, variable, args[2])) if isinstance(args[0], sp.MatrixBase) else sp.limit(args[0], variable, args[2])
     raise UnsupportedFeature(f"Unsupported function or argument count: {name}")
 
 
@@ -119,6 +144,19 @@ def build_expr(node, symbols):
     if not isinstance(node, dict):
         raise UnsupportedFeature("AST nodes must be objects")
     kind = node.get("kind")
+    if kind == "array":
+        items = node.get("items", [])
+        if not items:
+            raise UnsupportedFeature("Vectors and matrices cannot be empty")
+        if any(item.get("kind") == "array" for item in items):
+            if not all(item.get("kind") == "array" and len(item["items"]) == len(items[0]["items"]) for item in items):
+                raise UnsupportedFeature("Matrices require equally sized rows")
+            values = [[build_expr(entry, symbols) for entry in item["items"]] for item in items]
+        else:
+            values = [[build_expr(item, symbols)] for item in items]
+        if any(isinstance(entry, sp.MatrixBase) for row in values for entry in row):
+            raise UnsupportedFeature("Vector and matrix entries must be scalars")
+        return sp.ImmutableMatrix(values)
     if kind == "number":
         return _number(node.get("value"))
     if kind == "symbol":
@@ -143,6 +181,16 @@ def build_expr(node, symbols):
         left = build_expr(node["left"], symbols)
         right = build_expr(node["right"], symbols)
         operator = node.get("operator")
+        lm, rm = isinstance(left, sp.MatrixBase), isinstance(right, sp.MatrixBase)
+        if lm or rm:
+            if operator in {"+", "-"} and (not lm or not rm or left.shape != right.shape):
+                raise UnsupportedFeature("Addition and subtraction require matching vector or matrix dimensions")
+            if operator == "*" and lm and rm and left.cols != right.rows:
+                raise UnsupportedFeature(f"Cannot multiply {left.rows}×{left.cols} by {right.rows}×{right.cols}; use dot(u,v) for a dot product")
+            if operator == "/" and rm:
+                raise UnsupportedFeature("Division requires a scalar divisor; use inv or linsolve")
+            if operator == "^" and (not lm or rm or right.is_Integer is not True or left.rows != left.cols):
+                raise UnsupportedFeature("Matrix powers require a square matrix and an integer exponent")
         if operator == "+":
             return left + right
         if operator == "-":
@@ -250,7 +298,7 @@ def _display_value(value):
         "exact": str(exact_value),
         "mathml": sp.mathml(exact_value, printer="presentation"),
     }
-    if not exact_value.free_symbols and exact_value.is_number and not exact_value.is_Integer:
+    if not isinstance(exact_value, sp.MatrixBase) and not exact_value.free_symbols and exact_value.is_number and not exact_value.is_Integer:
         approximate = str(sp.N(exact_value, 12))
         if approximate != display["exact"]:
             display["approximate"] = approximate
@@ -276,11 +324,11 @@ def _evaluate_queries(query_rows, symbols, assignments, allow_symbolic=False):
             raise UndefinedDomainError(
                 "This query is undefined in V1 real mode."
             )
-        if value.is_real is False:
+        if any(entry.is_real is False for entry in (list(value) if isinstance(value, sp.MatrixBase) else [value])):
             raise RealDomainError(
                 "This query produces a complex value, which is outside V1 real mode."
             )
-        if not value.free_symbols and value.is_real is None:
+        if not value.free_symbols and any(entry.is_real is None for entry in (list(value) if isinstance(value, sp.MatrixBase) else [value])):
             raise UnresolvedValueError(
                 "SymPy could not establish a valid real value for this query."
             )
@@ -315,6 +363,117 @@ def _validate_candidates(candidates, equations, variables):
     return valid, unresolved
 
 
+def _vector(value, operation):
+    if not isinstance(value, sp.MatrixBase) or value.cols != 1:
+        raise UnsupportedFeature(f"{operation} requires column vectors")
+    return value
+
+
+def _matrix_call(name, args):
+    a = args[0]
+    if name in {"grad", "jacobian", "div", "curl", "hessian"}:
+        variables = list(_vector(args[1], name))
+        if not all(isinstance(v, sp.Symbol) for v in variables) or len(set(variables)) != len(variables):
+            raise UnsupportedFeature(f"{name} requires a list of distinct variables")
+        if name in {"grad", "hessian"}:
+            if isinstance(a, sp.MatrixBase):
+                raise UnsupportedFeature(f"{name} requires a scalar expression")
+            return sp.ImmutableMatrix([sp.diff(a, v) for v in variables]) if name == "grad" else sp.ImmutableMatrix(sp.hessian(a, variables))
+        a = _vector(a, name)
+        if name == "jacobian":
+            return a.jacobian(variables)
+        if len(a) != len(variables):
+            raise UnsupportedFeature(f"{name} requires one vector component per variable")
+        if name == "div":
+            return sum(sp.diff(a[i], v) for i, v in enumerate(variables))
+        if len(variables) != 3:
+            raise UnsupportedFeature("curl requires three components and three variables")
+        return sp.ImmutableMatrix([sp.diff(a[2], variables[1])-sp.diff(a[1], variables[2]), sp.diff(a[0], variables[2])-sp.diff(a[2], variables[0]), sp.diff(a[1], variables[0])-sp.diff(a[0], variables[1])])
+    if not isinstance(a, sp.MatrixBase):
+        raise UnsupportedFeature(f"{name} requires a vector or matrix")
+    if name in {"dot", "cross", "norm", "unit"}:
+        _vector(a, name)
+        if name in {"dot", "cross"}:
+            b = _vector(args[1], name)
+            if a.shape != b.shape:
+                raise UnsupportedFeature(f"{name} requires vectors of equal length")
+            if name == "cross" and a.rows != 3:
+                raise UnsupportedFeature("cross requires 3D vectors")
+            return a.dot(b) if name == "dot" else a.cross(b)
+        length = sp.sqrt(a.dot(a))
+        if name == "unit" and length == 0:
+            raise UnsupportedFeature("The zero vector has no unit vector")
+        return length if name == "norm" else a / length
+    if name == "transpose": return a.T
+    if name == "rank": return sp.Integer(a.rank())
+    if name == "linsolve":
+        b = _vector(args[1], name)
+        if a.rows != b.rows:
+            raise UnsupportedFeature("linsolve requires one right-hand entry per matrix row")
+        result = sp.linsolve((a, b))
+        if result == sp.EmptySet:
+            raise UnsupportedFeature("This linear system has no solution")
+        return sp.ImmutableMatrix(next(iter(result)))
+    if a.rows != a.cols:
+        raise UnsupportedFeature(f"{name} requires a square matrix")
+    if name == "det": return a.det()
+    if name == "trace": return a.trace()
+    if name == "inv":
+        if a.det() == 0:
+            raise UnsupportedFeature("A singular matrix has no inverse")
+        return a.inv()
+    raise UnsupportedFeature(f"Unsupported matrix operation: {name}")
+
+
+def _has_matrix(node):
+    if isinstance(node, list):
+        return any(_has_matrix(item) for item in node)
+    if not isinstance(node, dict):
+        return False
+    return node.get("kind") == "array" or node.get("name") in {"dot", "cross", "norm", "unit", "transpose", "det", "inv", "trace", "rank", "linsolve", "grad", "jacobian", "div", "curl", "hessian"} or any(_has_matrix(value) for value in node.values())
+
+
+def _solve_matrix_relations(relations):
+    definitions = {}
+    for row in relations:
+        if row["kind"] != "equation": continue
+        if row["left"]["kind"] != "symbol":
+            raise UnsupportedFeature("Use name = expression for matrix definitions and linsolve(A,b) for linear systems")
+        name = row["left"]["name"].lower()
+        if name in definitions:
+            raise UnsupportedFeature(f"Multiple definitions for {name}")
+        definitions[name] = row["right"]
+
+    class Definitions(dict):
+        def __init__(self, blocked=()):
+            super().__init__()
+            self.pending = set()
+            self.blocked = set(blocked)
+
+        def without(self, names):
+            return Definitions(self.blocked | names)
+
+        def setdefault(self, name, default=None):
+            if name in self: return self[name]
+            if name not in definitions or name in self.blocked: return super().setdefault(name, default)
+            if name in self.pending:
+                raise UnsupportedFeature(f"Circular definition involving {name}")
+            self.pending.add(name)
+            try:
+                self[name] = build_expr(definitions[name], self)
+            finally:
+                self.pending.remove(name)
+            return self[name]
+
+    symbols = Definitions()
+    values = {name: symbols.setdefault(name) for name in definitions}
+    # Validate declarations through the same real-domain checks as queries.
+    rows = [{"kind": "query", "expression": {"kind": "symbol", "name": name}} for name in definitions]
+    rows += [row for row in relations if row["kind"] == "query"]
+    evaluated, _ = _evaluate_queries(rows, symbols, {}, allow_symbolic=True)
+    return {"status": "solved", "variables": list(values), "solutions": [{"assignments": {name: _display_value(evaluated[index]) for index, name in enumerate(values)}, "queries": [_display_value(value) for value in evaluated[len(values):]]}]}
+
+
 def solve_payload(payload):
     try:
         relations = payload.get("relations", []) if isinstance(payload, dict) else []
@@ -329,6 +488,9 @@ def solve_payload(payload):
         query_rows = [row for row in relations if row.get("kind") == "query"]
         if len(equation_rows) + len(query_rows) != len(relations):
             raise UnsupportedFeature("Relations must be equations or queries")
+
+        if any(_has_matrix(row) for row in relations):
+            return _solve_matrix_relations(relations)
 
         variable_names = _equation_symbol_names(relations)
         equation_count = len(equation_rows)

@@ -2,6 +2,7 @@ import {
   BUILTIN_ARITY,
   isBuiltinFunction,
   type BuiltinFunction,
+  type ComparisonOperator,
   type ExpressionAst,
   type RelationAst,
 } from '@/registry/calculator/lib/dsl/ast'
@@ -115,10 +116,24 @@ class Parser {
 
   private parsePrimary(): ExpressionAst {
     const token = this.current()
+    if (this.match('lbracket')) {
+      const items: ExpressionAst[] = []
+      if (!this.at('rbracket')) {
+        do { items.push(this.parseExpression()) } while (this.match('comma'))
+      }
+      this.expect('rbracket', 'Expected "]"')
+      if (!items.length) throw new ParseError('Vectors and matrices cannot be empty', token.start, token.end)
+      const rows = items.filter(item => item.kind === 'array')
+      if (rows.length && (rows.length !== items.length || rows.some(row => row.items.length !== rows[0]!.items.length || row.items.some(item => item.kind === 'array')))) {
+        throw new ParseError('Matrices require equally sized rows of scalar entries', token.start, token.end)
+      }
+      return { kind: 'array', items }
+    }
     if (this.match('number')) return { kind: 'number', value: token.text }
 
     if (this.match('identifier')) {
-      const normalized = token.text.toLowerCase()
+      const isCall = this.at('lparen') || this.at('lbrace')
+      const normalized = isCall && isBuiltinFunction(token.text) ? token.text : token.text.toLowerCase()
       if (isBuiltinFunction(normalized)) {
         if (!this.at('lparen') && !this.at('lbrace')) {
           throw new ParseError(
@@ -163,7 +178,18 @@ class Parser {
 
     if (!this.at(closingKind)) {
       do {
-        args.push(this.parseExpression())
+        const first = this.parseExpression()
+        if (name === 'P' && (this.at('comparison') || this.at('equals'))) {
+          const operands = [first]
+          const operators: ComparisonOperator[] = []
+          while (this.at('comparison') || this.at('equals')) {
+            operators.push(this.advance().text as ComparisonOperator)
+            operands.push(this.parseExpression())
+          }
+          args.push({ kind: 'comparison', operands, operators })
+        } else {
+          args.push(first)
+        }
       } while (this.match('comma'))
     }
     this.expect(closingKind, `Expected "${closingText}"`)
@@ -184,7 +210,7 @@ class Parser {
       this.at('number') ||
       this.at('identifier') ||
       this.at('lparen') ||
-      this.at('lbrace')
+      this.at('lbrace') || this.at('lbracket')
     )
   }
 
