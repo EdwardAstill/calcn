@@ -29,7 +29,7 @@ export type SolverResult =
   | { status: 'unsupported'; message: string; feature?: string }
   | { status: 'error'; message: string }
 
-export type SolverMode = 'system' | 'symbolic'
+export type SolverMode = 'system' | 'symbolic' | 'workspace'
 
 export type SolverRequest = {
   type: 'solve'

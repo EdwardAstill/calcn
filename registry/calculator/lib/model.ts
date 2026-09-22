@@ -9,6 +9,12 @@ export type Relation = {
   enabled: boolean
 }
 
+export type VariableInput = {
+  id: string
+  name: string
+  source: string
+}
+
 export type SolverState =
   | { phase: 'idle' }
   | { phase: 'diagnostic'; code: 'no-relations'; message: string }
@@ -18,6 +24,7 @@ export type SolverState =
 export type CalculatorState = {
   source: string
   relations: Relation[]
+  variables: VariableInput[]
   editingId: string | null
   solver: SolverState
   helpOpen: boolean
@@ -26,12 +33,15 @@ export type CalculatorState = {
 export const initialCalculatorState: CalculatorState = {
   source: '',
   relations: [],
+  variables: [],
   editingId: null,
   solver: { phase: 'idle' },
   helpOpen: false,
 }
 
 export type CalculatorAction =
+  | { type: 'variable-saved'; variable: VariableInput }
+  | { type: 'variable-deleted'; id: string }
   | { type: 'library-added'; relations: Relation[] }
   | { type: 'source-changed'; source: string }
   | {

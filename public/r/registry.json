@@ -192,6 +192,16 @@
           "path": "registry/calculator/lib/completion.ts",
           "type": "registry:lib",
           "target": "@lib/calculator/completion.ts"
+        },
+        {
+          "path": "registry/calculator/ui/cell-grid.tsx",
+          "type": "registry:ui",
+          "target": "@ui/calculator/cell-grid.tsx"
+        },
+        {
+          "path": "registry/calculator/lib/workspace.ts",
+          "type": "registry:lib",
+          "target": "@lib/calculator/workspace.ts"
         }
       ],
       "type": "registry:block"

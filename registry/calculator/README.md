@@ -1,7 +1,7 @@
 # Calculator
 
 A standalone scientific calculator extracted from `edcn`, with MathJax
-previews, symbolic algebra and calculus, and a shared-equation workspace.
+rendering in cells, symbolic algebra and calculus, and a shared-equation workspace.
 
 ## Install
 
@@ -38,14 +38,19 @@ calculations reuse the worker. The worker is bundled into a module Blob.
 The solver returns exact, finite real solutions and distinguishes inconsistent,
 underdetermined, overdefined, unsupported, and unresolved systems. More equation
 rows than distinct unknowns count as overdefined, including redundant rows.
-The Plot tab graphs ticked equations and single-variable expressions directly with
-Recharts. Selection changes update the graph immediately. At most two distinct
-variables may appear across the ticked rows; additional variables show an error.
-Drag the plot to pan, scroll to zoom around the pointer, and use Reset view to
-return to −10 to 10 on both axes. Axes use the variable names (preferring `x` horizontally and `y` vertically).
-Bare expressions are graphed as functions of their variable. Implicit equations
-are numerically approximated in the visible axis window; very small features
-and isolated roots may be missed. Calculus calls must be evaluated before plotting.
+The interface has **Equations** and **Variables** grids. Equation symbols appear
+as variable rows automatically. Supplied variable values may be expressions:
+the cell shows the evaluated value, hover reveals the source, and editing shows
+the full expression. Values derived from equations and supplied variables are
+grey and read-only. Clearing a supplied value makes it unknown again. Each saved
+change recalculates values, including determined variables in a partial system.
+Names are optional for standalone expressions. Multiple solutions retain their
+matching solution numbers across variable rows.
+
+Enter saves and moves down, Tab saves and moves across, and Escape cancels.
+Selecting another cell also commits the edit. Ctrl+O opens the floating function
+picker; Ctrl+E opens the equation library. Functions insert into the active cell
+and library equations append to Equations. Plotting is currently hidden.
 
 ## Source layout
 
@@ -64,7 +69,7 @@ otherwise the component creates and disposes its own worker-backed client.
 
 ## Probability
 
-Distributions are part of the shared Relations workspace. For example:
+Distribution definitions go in Variables (name and expression in separate cells). For example:
 
 ```text
 X = Norm(0, 1)
@@ -85,12 +90,6 @@ Supported constructors: `Norm(mean, variance)` / `N(mean, variance)`,
 Distribution names are case-sensitive (`Exp` differs from arithmetic `exp`).
 The second Normal parameter is **variance**, not standard deviation.
 
-Tick declarations to plot densities or probability masses in the existing Plot
-tab. Tick probability queries to highlight their events. Referenced definitions
-must also be enabled. Numeric parameter definitions may appear in any row order.
-Plots start at a distribution-specific range; Reset view restores it.
-Discrete and continuous distributions cannot share a vertical axis.
-
 Probability calculations use bundled jStat numerical functions and do not need
 Python when all selected rows are declarations and numeric queries. Algebra and
 calculus continue to use SymPy. Probability values are approximate. One random
@@ -99,8 +98,8 @@ variables do not silently become independent. General nonlinear transformations,
 fitting, and solving probability constraints for unknowns are not implemented.
 Use `quantile` for inverse cumulative probabilities.
 
-The expression input offers grey function completions. Tab or Right Arrow inserts
-the function name and opening parenthesis; Escape dismisses it. Parameter hints
+The active input cell offers grey function completions. Tab or Right Arrow inserts
+the function name and opening parenthesis; Escape cancels the edit. Parameter hints
 also cover differentiation, integration, limits, and existing scientific functions.
 
 ### Vectors, matrices, and multivariable calculus
@@ -110,8 +109,7 @@ Named definitions support exact symbolic entries, dimension-checked arithmetic,
 `dot`, `cross`, `norm`, `unit`, `transpose`, `det`, `inv`, `trace`, `rank`, and
 `linsolve(A,b)`. Matrix powers accept integer exponents on square matrices.
 Calculus operates componentwise; `grad`, `jacobian`, `div`, `curl`, and `hessian`
-accept an explicit variable vector. Selected 2D vectors plot as arrows, and
-one-parameter two-component expressions plot over −10 to 10. See Help for limits.
+accept an explicit variable vector. See Help for limits.
 
 Run the Python adapter regression tests with a SymPy-enabled Python environment:
 `uv run --with sympy python tests/solver_matrix_test.py`.

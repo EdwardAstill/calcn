@@ -66,7 +66,7 @@ export default function CalculatorPage() {
 }
 ```
 
-The calculator renders plots directly with Recharts. Shared shadcn controls are
+Shared shadcn controls are
 declared as external registry dependencies. No edcn checkout is needed.
 
 This copies the calculator source into your project and installs its dependencies.
@@ -80,8 +80,21 @@ For local registry development, run `bun run registry:serve` and install from
 
 ## Build and verify
 
-The **Library** tab above the relations opens a floating equation picker. Select
-equations and click **Add selected** to append them to the current relations.
+The app has two grids: **Equations** and **Variables**. Equations automatically
+populate their symbols in Variables. Supply a value or expression in a variable's
+value cell; values recalculate after each saved change. Supplied expressions show
+their evaluated value normally, their full source on hover, and their source when
+editing. Values determined entirely by equations and supplied variables are grey
+and locked. Clear a supplied value to let that variable be solved instead.
+
+Enter/F2 or double-click edits a cell. Enter saves and moves down, Tab saves and
+moves across, and Escape cancels. Selecting another cell also saves the edit.
+Names are optional for standalone expressions. Arrow keys navigate, Shift + arrows
+select a range, and Ctrl+C copies the displayed values. Ctrl+F focuses Variables.
+Ctrl+O opens the floating function picker; Ctrl+E opens the equation library.
+The library offers grouped checkboxes, **Add selected**, and **Add set**.
+Plotting is currently hidden from the interface.
+
 Library entries come from Markdown files in `library/`: headings name groups and
 `$...$` or `$$...$$` delimit equations in calculator notation. Use explicit
 multiplication between variables, such as `$V = I*R$`. Rebuild the app after

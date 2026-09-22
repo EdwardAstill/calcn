@@ -14,6 +14,19 @@ export function calculatorReducer(
   action: CalculatorAction,
 ): CalculatorState {
   switch (action.type) {
+    case 'variable-saved':
+      return {
+        ...state,
+        source: '',
+        editingId: null,
+        variables: state.variables.some(variable => variable.id === action.variable.id)
+          ? state.variables.map(variable => variable.id === action.variable.id ? action.variable : variable)
+          : [...state.variables, action.variable],
+        solver: idleSolver(),
+      }
+    case 'variable-deleted':
+      return { ...state, variables: state.variables.filter(variable => variable.id !== action.id), solver: idleSolver() }
+
     case 'library-added':
       return {
         ...state,

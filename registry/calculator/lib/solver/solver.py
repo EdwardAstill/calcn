@@ -480,9 +480,9 @@ def solve_payload(payload):
         if not relations:
             return {"status": "error", "message": "No relations were supplied."}
         mode = payload.get("mode", "system")
-        if mode not in {"system", "symbolic"}:
+        if mode not in {"system", "symbolic", "workspace"}:
             raise UnsupportedFeature(f"Unsupported solver mode: {mode}")
-        allow_symbolic = mode == "symbolic"
+        allow_symbolic = mode in {"symbolic", "workspace"}
 
         equation_rows = [row for row in relations if row.get("kind") == "equation"]
         query_rows = [row for row in relations if row.get("kind") == "query"]
@@ -550,6 +550,13 @@ def solve_payload(payload):
             if not allow_symbolic
             or any(assignments[variable] != variable for _, assignments in valid)
         ]
+        if mode == "workspace":
+            # Only lock a variable if every solution determines its value.
+            # Free parameters stay editable even when other variables are solved.
+            display_variables = [
+                variable for variable in display_variables
+                if all(not assignments[variable].free_symbols for _, assignments in valid)
+            ]
         serialized_solutions = []
         for _, assignments in valid:
             query_values, free = _evaluate_queries(

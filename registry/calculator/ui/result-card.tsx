@@ -1,70 +1,17 @@
-import { MathExpression } from '@/registry/calculator/ui/math'
-import { AlertCircle, CheckCircle2, Info } from 'lucide-react'
+import { AlertCircle, Info } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 
 import type { SolverState } from '@/registry/calculator/lib/model'
-import { toMathMl } from '@/registry/calculator/lib/dsl/mathml'
 import type { SolverEngineSnapshot } from '@/registry/calculator/lib/solver/client'
-import type { DisplayValue, SolverResult } from '@/registry/calculator/lib/solver/protocol'
+import type { SolverResult } from '@/registry/calculator/lib/solver/protocol'
 
 type ResultCardProps = {
   solver: SolverState
   engine: SolverEngineSnapshot
   onRetry(): void
-}
-
-function Value({ value }: { value: DisplayValue }) {
-  return (
-    <span className="inline-flex flex-wrap items-center justify-end gap-2 text-base">
-      <MathExpression aria-hidden="true" mathml={value.mathml} />
-      <code className="sr-only">{value.exact}</code>
-      {value.approximate ? (
-        <span className="text-muted-foreground">
-          {'≈ '}
-          <MathExpression mathml={toMathMl({ kind: 'number', value: value.approximate })} />
-        </span>
-      ) : null}
-    </span>
-  )
-}
-
-function Solved({ result }: { result: Extract<SolverResult, { status: 'solved' }> }) {
-  return (
-    <div className="grid gap-3">
-      <Alert>
-        <CheckCircle2 />
-        <AlertTitle>Solved over the reals</AlertTitle>
-        <AlertDescription>
-          {result.solutions.length}{' '}
-          {result.solutions.length === 1 ? 'solution' : 'solutions'} found.
-        </AlertDescription>
-      </Alert>
-      {result.solutions.map((solution, index) => (
-        <section className="grid gap-2" key={`solution-${index + 1}`}>
-          <h3 className="text-sm font-medium">Solution {index + 1}</h3>
-          <dl className="grid gap-2">
-            {Object.entries(solution.assignments).map(([name, value]) => (
-              <div className="flex items-center justify-between gap-4" key={name}>
-                <dt className="text-base" aria-label={name}>
-                  <MathExpression aria-hidden="true" mathml={toMathMl({ kind: 'symbol', name })} />
-                </dt>
-                <dd className="min-w-0 overflow-x-auto py-1"><Value value={value} /></dd>
-              </div>
-            ))}
-            {solution.queries.map((value, queryIndex) => (
-              <div className="flex items-center justify-between gap-4" key={`query-${queryIndex + 1}`}>
-                <dt>Query {queryIndex + 1}</dt>
-                <dd className="min-w-0 overflow-x-auto py-1"><Value value={value} /></dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      ))}
-    </div>
-  )
 }
 
 function Diagnostic({
@@ -111,7 +58,7 @@ export function ResultCard({ solver, engine, onRetry }: ResultCardProps) {
     )
   } else if (solver.phase === 'complete') {
     content = solver.result.status === 'solved'
-      ? <Solved result={solver.result} />
+      ? null
       : <Diagnostic result={solver.result} onRetry={onRetry} />
   } else if (engine.phase === 'failed') {
     content = (
@@ -122,7 +69,7 @@ export function ResultCard({ solver, engine, onRetry }: ResultCardProps) {
     )
   } else {
     content = (
-      <p className="text-sm text-muted-foreground">Select relations and calculate to see results.</p>
+      <p className="text-sm text-muted-foreground">Add equations or variable values to begin.</p>
     )
   }
 

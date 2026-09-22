@@ -2,222 +2,204 @@
 
 import '@/registry/calculator/ui/math.css'
 
-import { hasMatrixValues } from '@/registry/calculator/lib/dsl/ast'
-
-import { completeFunction, functionHint } from '@/registry/calculator/lib/completion'
-import { hasProbability } from '@/registry/calculator/lib/probability'
-import {
-  BookOpen,
-  Calculator,
-  ChartNoAxesColumn,
-  CircleHelp,
-  Ellipsis,
-  Eraser,
-  Pencil,
-  Plus,
-  Trash2,
-} from 'lucide-react'
-import {
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react'
-
-import { Badge } from '@/components/ui/badge'
+import { BookOpen, CircleHelp, Ellipsis, LockKeyhole, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
-import {
-  Field,
-  FieldError,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from '@/components/ui/field'
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Kbd } from '@/components/ui/kbd'
-import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-
+import { CellGrid, type GridCell } from '@/registry/calculator/ui/cell-grid'
 import { CalculatorMathProvider, MathExpression } from '@/registry/calculator/ui/math'
 import { OperationLabel } from '@/registry/calculator/ui/operation-label'
-import { RelationPlot } from '@/registry/calculator/ui/relation-plot'
 import { ResultCard } from '@/registry/calculator/ui/result-card'
-import type { RelationAst } from '@/registry/calculator/lib/dsl/ast'
+import { completeFunction, functionHint } from '@/registry/calculator/lib/completion'
 import { relationToMathMl } from '@/registry/calculator/lib/dsl/mathml'
 import { parseRelation } from '@/registry/calculator/lib/dsl/parser'
 import { HELP_CONTENT_HTML } from '@/registry/calculator/lib/generated/help-content'
 import { EQUATION_LIBRARY } from '@/registry/calculator/lib/generated/equation-library'
-import { initialCalculatorState } from '@/registry/calculator/lib/model'
+import { initialCalculatorState, type CalculatorAction, type CalculatorState, type Relation } from '@/registry/calculator/lib/model'
 import { applyInsertion, OPERATION_GROUPS } from '@/registry/calculator/lib/operations'
 import { calculatorReducer } from '@/registry/calculator/lib/reducer'
-import {
-  createSolverClient,
-  type SolverClient,
-  type SolverEngineSnapshot,
-} from '@/registry/calculator/lib/solver/client'
+import { parseVariable, variableRows, workspaceRelations, type VariableRow } from '@/registry/calculator/lib/workspace'
+import { createSolverClient, type SolverClient, type SolverEngineSnapshot } from '@/registry/calculator/lib/solver/client'
 import { preflight } from '@/registry/calculator/lib/solver/preflight'
-import type { SolverMode, SolverResult } from '@/registry/calculator/lib/solver/protocol'
+import type { SolverResult } from '@/registry/calculator/lib/solver/protocol'
 
 type ScientificCalculatorProps = { solverClient?: SolverClient }
-
-type EditorParseState =
-  | { kind: 'empty' }
-  | { kind: 'valid'; ast: RelationAst; mathml: string }
-  | { kind: 'invalid'; message: string }
+type GridName = 'Equations' | 'Variables'
+type CellPosition = { grid: GridName; row: number; column: number }
+type EditTarget = CellPosition & { id: string | null; name: string; source: string }
 
 const IDLE_ENGINE: SolverEngineSnapshot = { phase: 'idle' }
-const LIBRARY_EQUATIONS = EQUATION_LIBRARY.flatMap((file) =>
-  file.groups.flatMap((group) => group.equations),
-)
-
-function parseEditor(source: string): EditorParseState {
-  if (!source.trim()) return { kind: 'empty' }
-  try {
-    const ast = parseRelation(source)
-    return { kind: 'valid', ast, mathml: relationToMathMl(ast) }
-  } catch (error) {
-    return {
-      kind: 'invalid',
-      message: error instanceof Error ? error.message : 'This expression is not valid.',
-    }
-  }
-}
+const LIBRARY_EQUATIONS = EQUATION_LIBRARY.flatMap(file => file.groups.flatMap(group => group.equations))
 
 export function ScientificCalculator(props: ScientificCalculatorProps) {
-  return (
-    <CalculatorMathProvider>
-      <CalculatorWorkspace {...props} />
-    </CalculatorMathProvider>
-  )
+  return <CalculatorMathProvider><CalculatorWorkspace {...props} /></CalculatorMathProvider>
 }
 
 function CalculatorWorkspace({ solverClient }: ScientificCalculatorProps) {
   const client = useMemo(() => solverClient ?? createSolverClient(), [solverClient])
   const [state, dispatch] = useReducer(calculatorReducer, initialCalculatorState)
-  const [activeTab, setActiveTab] = useState('calculator')
-  const [operationGroup, setOperationGroup] = useState<string>(OPERATION_GROUPS[0].name)
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
+  const [picker, setPicker] = useState<'functions' | 'equations' | null>(null)
   const [pendingGroup, setPendingGroup] = useState<string | null>(null)
-  const calculatorTabRef = useRef<HTMLButtonElement>(null)
-  const plotTabRef = useRef<HTMLButtonElement>(null)
-  const relationsTabRef = useRef<HTMLButtonElement>(null)
-  const operationTabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const shortcutFocusFrame = useRef(0)
-  const [relationsTab, setRelationsTab] = useState('relations')
   const [selectedEquations, setSelectedEquations] = useState<Set<typeof LIBRARY_EQUATIONS[number]>>(new Set())
-  const libraryTabRef = useRef<HTMLButtonElement>(null)
-  const editorRef = useRef<HTMLInputElement>(null)
-  const focusEditorAfterMenu = useRef(false)
-  const relationSequence = useRef(0)
-  const requestSequence = useRef(0)
-  const parsed = useMemo(() => parseEditor(state.source), [state.source])
-  const [caret, setCaret] = useState(0)
-  const [editorFocused, setEditorFocused] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
-  const [editorScroll, setEditorScroll] = useState(0)
-  const completion = editorFocused && !dismissed ? completeFunction(state.source, caret) : null
-  const hint = functionHint(state.source, caret)
-  const [preview, setPreview] = useState('')
   const [editorError, setEditorError] = useState<string | null>(null)
-  const engine = useSyncExternalStore(
-    (listener) => client.subscribe(listener),
-    () => client.getSnapshot(),
-    () => IDLE_ENGINE,
-  )
-
-  useEffect(() => {
-    setEditorError(null)
-    if (parsed.kind === 'valid') setPreview(parsed.mathml)
-    else if (parsed.kind === 'empty') setPreview('')
-  }, [parsed])
+  const [retryCount, setRetryCount] = useState(0)
+  const [editorFocused, setEditorFocused] = useState(false)
+  const [editorScroll, setEditorScroll] = useState(0)
+  const [caret, setCaret] = useState(0)
+  const editorRef = useRef<HTMLInputElement>(null)
+  const workspaceRef = useRef<HTMLElement>(null)
+  const operationGroupRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const activeCell = useRef<CellPosition>({ grid: 'Equations', row: 0, column: 0 })
+  const rowSequence = useRef(0)
+  const requestSequence = useRef(0)
+  const shortcutFocusFrame = useRef(0)
+  const editingName = editTarget?.grid === 'Variables' && editTarget.column === 0
+  const completion = editTarget && !editingName && editorFocused ? completeFunction(state.source, caret) : null
+  const hint = editTarget && !editingName ? functionHint(state.source, caret) : null
+  const result = state.solver.phase === 'complete' ? state.solver.result : undefined
+  const variables = useMemo(() => variableRows(state.relations, state.variables, result), [state.relations, state.variables, result])
+  const selectedVariable = activeCell.current.grid === 'Variables' ? variables[activeCell.current.row] : undefined
+  const functionInsertionLocked = Boolean(editingName || (!editTarget && selectedVariable?.locked))
+  const engine = useSyncExternalStore(listener => client.subscribe(listener), () => client.getSnapshot(), () => IDLE_ENGINE)
 
   useEffect(() => {
     client.start()
-    if (solverClient) return
-    return () => client.dispose()
+    if (!solverClient) return () => client.dispose()
   }, [client, solverClient])
 
   useEffect(() => {
-    let focusFrame = 0
-    const focusEditor = () => {
-      setActiveTab('calculator')
-      dispatch({ type: 'help-changed', open: false })
-      setRelationsTab('relations')
-      cancelAnimationFrame(focusFrame)
-      focusFrame = requestAnimationFrame(() => editorRef.current?.focus())
-    }
-    focusEditor()
-    window.addEventListener('focus', focusEditor)
-    return () => {
-      cancelAnimationFrame(focusFrame)
-      window.removeEventListener('focus', focusEditor)
-      cancelAnimationFrame(shortcutFocusFrame.current)
-    }
+    const frame = requestAnimationFrame(() => focusCell({ grid: 'Equations', row: 0, column: 0 }))
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(shortcutFocusFrame.current) }
   }, [])
 
-  function saveRelation() {
-    if (parsed.kind !== 'valid') {
-      setEditorError(parsed.kind === 'invalid' ? parsed.message : 'Enter an expression or equation first.')
-      return
-    }
-    setEditorError(null)
-    relationSequence.current += 1
-    dispatch({
-      type: 'save',
-      id: `relation-${relationSequence.current}`,
-      source: state.source.trim(),
-      ast: parsed.ast,
-      now: relationSequence.current,
-    })
-    queueMicrotask(() => editorRef.current?.focus())
+  useEffect(() => {
+    const relations = workspaceRelations(state.relations, state.variables)
+    if (!relations.length) return
+    let current = true
+    const requestId = `calculation-${++requestSequence.current}`
+    dispatch({ type: 'solve-started', requestId })
+    const validation = preflight(relations)
+    const calculation = validation.ok
+      ? client.solve(relations, 'workspace')
+      : Promise.resolve<SolverResult>({ ...validation, status: 'overdefined' })
+    void calculation.catch(error => ({ status: 'error', message: error instanceof Error ? error.message : 'The solver stopped unexpectedly.' } as SolverResult))
+      .then(result => { if (current) dispatch({ type: 'solve-finished', requestId, result }) })
+    return () => { current = false }
+  }, [client, state.relations, state.variables, retryCount])
+
+  function focusCell(position: CellPosition) {
+    workspaceRef.current?.querySelector<HTMLElement>(`[aria-label="${position.grid}"] [data-row="${position.row}"][data-column="${position.column}"]`)?.focus()
   }
 
-  function addLibraryEquations(equations = LIBRARY_EQUATIONS.filter((equation) => selectedEquations.has(equation))) {
-    const relations = equations.map((equation) => {
-      relationSequence.current += 1
-      return {
-        id: `relation-${relationSequence.current}`,
-        source: equation.source,
-        ast: equation.ast,
-        createdAt: relationSequence.current,
-        enabled: true,
+  function returnToCell() {
+    const { grid, row, column } = activeCell.current
+    return editorRef.current ?? workspaceRef.current?.querySelector<HTMLElement>(`[aria-label="${grid}"] [data-row="${row}"][data-column="${column}"]`)
+      ?? workspaceRef.current?.querySelector<HTMLElement>('[aria-label="Equations"] [role="gridcell"]') ?? null
+  }
+
+  function commitCell(): CalculatorState | null {
+    if (!editTarget) return state
+    try {
+      let action: CalculatorAction
+      if (editTarget.grid === 'Equations') {
+        if (!state.source.trim() && !editTarget.id) action = { type: 'clear-editor' }
+        else {
+          const ast = parseRelation(state.source)
+          if (ast.kind !== 'equation') throw new Error('Enter an equation with =. Put values and expressions in Variables.')
+          action = { type: 'save', id: editTarget.id ?? `equation-${++rowSequence.current}`, source: state.source.trim(), ast, now: rowSequence.current }
+        }
+      } else {
+        const variable = parseVariable(editTarget.column === 0 ? state.source : editTarget.name, editTarget.column === 1 ? state.source : editTarget.source)
+        if (variable.name && variables.some(row => row.name === variable.name && row.id !== editTarget.id)) {
+          throw new Error(`${variable.name} already has a row. Edit its value there.`)
+        }
+        action = !variable.name && !variable.source
+          ? { type: 'variable-deleted', id: editTarget.id! }
+          : { type: 'variable-saved', variable: { id: editTarget.id!, ...variable } }
       }
+      const next = calculatorReducer(state, action)
+      dispatch(action)
+      setEditTarget(null)
+      setEditorError(null)
+      return next
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'This cell is not valid.')
+      requestAnimationFrame(() => editorRef.current?.focus())
+      return null
+    }
+  }
+
+  function cancelCell() {
+    const position = editTarget
+    dispatch({ type: 'clear-editor' })
+    setEditTarget(null)
+    setEditorError(null)
+    if (position) requestAnimationFrame(() => focusCell(position))
+  }
+
+  function startEdit(target: EditTarget, replacement?: string) {
+    if (editTarget?.grid === target.grid && editTarget.id === target.id && editTarget.column === target.column && replacement === undefined) {
+      editorRef.current?.focus()
+      return
+    }
+    if (editTarget && !commitCell()) return
+    dispatch(target.grid === 'Equations' && target.id ? { type: 'edit', id: target.id } : { type: 'clear-editor' })
+    dispatch({ type: 'source-changed', source: replacement ?? (target.grid === 'Variables' && target.column === 0 ? target.name : target.source) })
+    setEditTarget(target)
+    setEditorError(null)
+    activeCell.current = target
+    requestAnimationFrame(() => editorRef.current?.focus())
+  }
+
+  function selectCell(position: CellPosition) {
+    if (editTarget && (editTarget.grid !== position.grid || editTarget.row !== position.row || editTarget.column !== position.column)) {
+      if (!commitCell()) return
+    }
+    activeCell.current = position
+  }
+
+  function equationTarget(row: number): EditTarget {
+    const equation = state.relations[row]
+    return { grid: 'Equations', row, column: 0, id: equation?.id ?? null, source: equation?.source ?? '', name: '' }
+  }
+
+  function variableTarget(row: number, column: number): EditTarget {
+    const variable = variables[row]
+    return { grid: 'Variables', row, column, id: variable?.id ?? `variable-${++rowSequence.current}`, name: variable?.name ?? '', source: variable?.source ?? '' }
+  }
+
+  function toggleEquation(equation: typeof LIBRARY_EQUATIONS[number]) {
+    setSelectedEquations(previous => {
+      const next = new Set(previous)
+      if (next.has(equation)) next.delete(equation)
+      else next.add(equation)
+      return next
     })
+  }
+
+  function addLibraryEquations(equations = LIBRARY_EQUATIONS.filter(equation => selectedEquations.has(equation))) {
+    const relations = equations.map(equation => ({ id: `equation-${++rowSequence.current}`, source: equation.source, ast: equation.ast, createdAt: rowSequence.current, enabled: true }))
     dispatch({ type: 'library-added', relations })
     setSelectedEquations(new Set())
-    setRelationsTab('relations')
-    requestAnimationFrame(() => relationsTabRef.current?.focus())
+    setPicker(null)
   }
 
   function insertOperation(template: string) {
-    const editor = editorRef.current
-    const insertion = applyInsertion(
-      state.source,
-      {
-        start: editor?.selectionStart ?? state.source.length,
-        end: editor?.selectionEnd ?? state.source.length,
-      },
-      template,
-    )
+    if (functionInsertionLocked) return
+    const target = editTarget ?? (activeCell.current.grid === 'Equations' ? equationTarget(activeCell.current.row) : variableTarget(activeCell.current.row, 1))
+    const source = editTarget ? state.source : target.source
+    const insertion = applyInsertion(source, {
+      start: editTarget ? editorRef.current?.selectionStart ?? source.length : source.length,
+      end: editTarget ? editorRef.current?.selectionEnd ?? source.length : source.length,
+    }, template)
+    if (!editTarget) startEdit(target)
     dispatch({ type: 'source-changed', source: insertion.source })
-    cancelAnimationFrame(shortcutFocusFrame.current)
+    setPicker(null)
     shortcutFocusFrame.current = requestAnimationFrame(() => {
       editorRef.current?.focus()
       editorRef.current?.setSelectionRange(insertion.selection.start, insertion.selection.end)
@@ -228,74 +210,43 @@ function CalculatorWorkspace({ solverClient }: ScientificCalculatorProps) {
     if (event.isComposing || event.repeat) return
     const key = event.key.toLowerCase()
     const target = event.target as HTMLElement
-    const editing = target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
-
-    if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && ['c', 'p', 'r', 'l'].includes(key)) {
-      // Keep the familiar copy shortcut when text is selected.
-      if (key === 'c' && (
-        window.getSelection()?.toString() ||
-        ((target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && target.selectionStart !== target.selectionEnd)
-      )) return
+    if (target.closest('[role="menu"]')) return
+    if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && ['f', 'o', 'e', 'r', 'l'].includes(key)) {
       event.preventDefault()
       event.stopPropagation()
-      cancelAnimationFrame(shortcutFocusFrame.current)
       setPendingGroup(null)
       dispatch({ type: 'help-changed', open: false })
-      if (key === 'c') setActiveTab('calculator')
-      if (key === 'p') setActiveTab('plot')
-      if (key === 'r') setRelationsTab('relations')
-      if (key === 'l') setRelationsTab('library')
-      shortcutFocusFrame.current = requestAnimationFrame(() => {
-        const tab = key === 'c' ? calculatorTabRef.current
-          : key === 'p' ? plotTabRef.current
-          : key === 'l' ? libraryTabRef.current : relationsTabRef.current
-        tab?.focus()
-        tab?.scrollIntoView({ block: 'nearest' })
-      })
-      return
-    }
-
-    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
-    if (key === 'escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      cancelAnimationFrame(shortcutFocusFrame.current)
-      setPendingGroup(null)
-      if (target === editorRef.current) {
-        const group = OPERATION_GROUPS.find(group => group.name === operationGroup)!
-        operationTabRefs.current[group.shortcut]?.focus()
-      } else {
-        setActiveTab('calculator')
-        dispatch({ type: 'help-changed', open: false })
-        setRelationsTab('relations')
-        shortcutFocusFrame.current = requestAnimationFrame(() => editorRef.current?.focus())
+      if (key === 'o') setPicker('functions')
+      else if (key === 'e' || key === 'l') setPicker('equations')
+      else {
+        setPicker(null)
+        shortcutFocusFrame.current = requestAnimationFrame(() => focusCell({ grid: 'Variables', row: 0, column: variables.length ? 1 : 0 }))
       }
       return
     }
-    if (editing || target.closest('[role="dialog"], [role="menu"]')) {
-      if (pendingGroup) setPendingGroup(null)
+    if (target.closest('[role="dialog"]') && !target.closest('[data-functions-picker]')) return
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+    if (target.closest('input, [role="gridcell"]')) return
+    if (key === 'escape') {
+      if (picker) return
+      event.preventDefault()
+      setPendingGroup(null)
+      returnToCell()?.focus()
       return
     }
     if (pendingGroup) {
       const group = OPERATION_GROUPS.find(group => group.shortcut === pendingGroup)!
       const item = group.items.find(item => item.shortcut === key)
       setPendingGroup(null)
-      if (item) {
-        event.preventDefault()
-        event.stopPropagation()
-        insertOperation(item.template)
-      }
+      if (item) { event.preventDefault(); insertOperation(item.template) }
       return
     }
     const group = OPERATION_GROUPS.find(group => group.shortcut === key)
     if (group) {
       event.preventDefault()
-      event.stopPropagation()
-      setActiveTab('calculator')
-      setOperationGroup(group.name)
+      setPicker('functions')
       setPendingGroup(group.shortcut)
-      cancelAnimationFrame(shortcutFocusFrame.current)
-      shortcutFocusFrame.current = requestAnimationFrame(() => operationTabRefs.current[group.shortcut]?.focus())
+      shortcutFocusFrame.current = requestAnimationFrame(() => operationGroupRefs.current[group.shortcut]?.focus())
     }
   }
 
@@ -304,354 +255,225 @@ function CalculatorWorkspace({ solverClient }: ScientificCalculatorProps) {
     return () => window.removeEventListener('keydown', handleShortcuts, true)
   })
 
-  async function solveRelations(
-    relations: RelationAst[],
-    mode: SolverMode = 'system',
-  ) {
-    if (mode === 'symbolic' && (hasProbability(relations) || hasMatrixValues([...relations, ...state.relations.filter(row => row.enabled).map(row => row.ast)]))) {
-      relations = [...state.relations.filter(row => row.enabled && row.ast.kind === 'equation' && row.ast.left.kind === 'symbol' && !relations.includes(row.ast)).map(row => row.ast), ...relations]
-    }
-    if (relations.length === 0) {
-      dispatch({
-        type: 'local-diagnostic',
-        code: 'no-relations',
-        message: state.relations.length === 0
-          ? 'Add an expression to the shared system first.'
-          : 'Enable at least one relation first.',
-      })
-      return
-    }
-
-    requestSequence.current += 1
-    const requestId = `calculation-${requestSequence.current}`
-    dispatch({ type: 'solve-started', requestId })
-
-    let result: SolverResult
-    const validation = preflight(relations)
-    if (!validation.ok) {
-      result = {
-        status: validation.status,
-        equationCount: validation.equationCount,
-        variableCount: validation.variableCount,
-        message: validation.message,
-      }
-    } else {
-      try {
-        result = await client.solve(relations, mode)
-      } catch (error) {
-        result = {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'The solver stopped unexpectedly.',
-        }
-      }
-    }
-    dispatch({ type: 'solve-finished', requestId, result })
-  }
-
-  function calculate() {
-    return solveRelations(
-      state.relations
-        .filter((relation) => relation.enabled)
-        .map((relation) => relation.ast),
+  function cellEditor() {
+    return (
+      <div className="w-full min-w-0 whitespace-normal">
+        <div className="relative font-mono">
+          {completion && <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center overflow-hidden">
+            <span className="whitespace-pre" style={{ transform: `translateX(-${editorScroll}px)` }}><span className="invisible">{state.source}</span><span className="text-muted-foreground/60">{completion.suffix}</span></span>
+          </div>}
+          <input ref={editorRef} className="w-full min-w-0 bg-transparent py-1 outline-none"
+            aria-label={`${editTarget!.grid} ${String.fromCharCode(65 + editTarget!.column)}${editTarget!.row + 1} ${editingName ? 'name' : 'expression'}`}
+            aria-invalid={Boolean(editorError)} aria-describedby={editorError ? 'calculator-cell-error' : 'calculator-function-hint'}
+            aria-autocomplete="inline" autoComplete="off" spellCheck={false} value={state.source}
+            onFocus={() => setEditorFocused(true)} onBlur={() => setEditorFocused(false)}
+            onScroll={event => setEditorScroll(event.currentTarget.scrollLeft)}
+            onSelect={event => setCaret(event.currentTarget.selectionStart === event.currentTarget.selectionEnd ? event.currentTarget.selectionStart ?? 0 : -1)}
+            onChange={event => { dispatch({ type: 'source-changed', source: event.target.value }); setCaret(event.target.selectionStart ?? 0); setEditorError(null) }}
+            onKeyDown={event => {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === 'Escape') { event.preventDefault(); cancelCell(); return }
+              if ((event.key === 'Tab' || event.key === 'ArrowRight') && completion && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                event.preventDefault()
+                const source = state.source.slice(0, completion.replaceFrom) + completion.insertion
+                dispatch({ type: 'source-changed', source })
+                setCaret(source.length)
+                requestAnimationFrame(() => editorRef.current?.setSelectionRange(source.length, source.length))
+                return
+              }
+              if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault()
+                if (event.repeat) return
+                const target = editTarget!
+                const next = commitCell()
+                if (!next) return
+                const rows = target.grid === 'Equations' ? next.relations : variableRows(next.relations, next.variables)
+                const savedRow = rows.findIndex(row => row.id === target.id)
+                let row = savedRow < 0 ? Math.min(target.row, rows.length) : savedRow
+                let column = target.column
+                if (event.key === 'Enter') row = Math.max(0, Math.min(rows.length, row + (event.shiftKey ? -1 : 1)))
+                else {
+                  column += event.shiftKey ? -1 : 1
+                  if (column < 0) { row = Math.max(0, row - 1); column = 2 }
+                  if (column > 2) { row = Math.min(rows.length, row + 1); column = 0 }
+                }
+                requestAnimationFrame(() => focusCell({ grid: target.grid, row, column }))
+              }
+            }} />
+        </div>
+        {editorError && <p id="calculator-cell-error" role="alert" className="text-xs text-destructive">{editorError}</p>}
+      </div>
     )
   }
 
+  function editing(grid: GridName, id: string | null, column: number) {
+    return editTarget?.grid === grid && editTarget.id === id && editTarget.column === column
+  }
+
+  function equationActions(equation: Relation, row: number) {
+    return <DropdownMenu>
+      <DropdownMenuTrigger render={<Button tabIndex={-1} variant="ghost" size="icon-sm" aria-label={`Actions for ${equation.source}`} />}><Ellipsis /></DropdownMenuTrigger>
+      <DropdownMenuContent align="end" finalFocus={returnToCell}>
+        <DropdownMenuItem onClick={() => startEdit(equationTarget(row))}><Pencil /> Edit</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={() => { if (editTarget?.id === equation.id) cancelCell(); dispatch({ type: 'delete', id: equation.id }) }}><Trash2 /> Delete</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  }
+
+  function variableCells(variable: VariableRow, row: number): GridCell[] {
+    const text = variable.values.map(value => value.exact).join('; ')
+    const isEditingValue = editing('Variables', variable.id, 1)
+    const valueContent = variable.values.length ? <span className="inline-flex items-center gap-2">
+      {variable.locked && <LockKeyhole className="size-3 shrink-0" aria-hidden="true" />}
+      {variable.values.map((value, index) => <span className="inline-flex items-center gap-1" key={index}>
+        {variable.values.length > 1 && <span className="text-xs">{index + 1}:</span>}<MathExpression mathml={value.mathml} />
+      </span>)}
+    </span> : <span className="text-muted-foreground">{variable.source ? '—' : 'Enter value'}</span>
+    return [
+      { text: variable.name, readOnly: variable.generated || variable.locked,
+        content: editing('Variables', variable.id, 0) ? cellEditor() : variable.name || <span className="text-muted-foreground">Optional name</span>,
+        onActivate: () => startEdit(variableTarget(row, 0)), onType: text => startEdit(variableTarget(row, 0), text) },
+      { text: isEditingValue ? state.source : text, title: variable.source || `Calculated from equations: ${text}`, readOnly: variable.locked && !isEditingValue,
+        className: variable.locked && !isEditingValue ? 'calculator-computed-cell' : undefined,
+        content: isEditingValue ? cellEditor() : <span title={variable.source || `Calculated from equations: ${text}`} className="block w-full">{valueContent}</span>,
+        onActivate: () => startEdit(variableTarget(row, 1)), onType: text => startEdit(variableTarget(row, 1), text) },
+      { text: variable.supplied ? 'Clear supplied value' : '', content: variable.supplied || (!variable.generated && !variable.locked) ? <DropdownMenu>
+        <DropdownMenuTrigger render={<Button tabIndex={-1} variant="ghost" size="icon-sm" aria-label={`Actions for variable ${variable.name || row + 1}`} />}><Ellipsis /></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" finalFocus={returnToCell}>
+          {variable.supplied && <DropdownMenuItem onClick={() => { if (editTarget?.id === variable.id) cancelCell(); dispatch({ type: 'variable-saved', variable: { id: variable.id, name: variable.name, source: '' } }) }}>Clear supplied value</DropdownMenuItem>}
+          <DropdownMenuItem variant="destructive" onClick={() => { if (editTarget?.id === variable.id) cancelCell(); dispatch({ type: 'variable-deleted', id: variable.id }) }}><Trash2 /> Remove variable</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu> : null },
+    ]
+  }
+
   return (
-    <section
-      className="calculator-math mx-auto w-full max-w-7xl p-4 sm:p-6"
-      aria-label="Scientific calculator workspace"
-      onPointerDownCapture={() => { setPendingGroup(null); cancelAnimationFrame(shortcutFocusFrame.current) }}
-    >
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <TabsList aria-label="Workspace tool">
-              <TabsTrigger value="calculator" ref={calculatorTabRef} aria-label="Calculator" aria-keyshortcuts="Control+c">
-                <Calculator /> Calculator <Kbd aria-hidden="true">Ctrl C</Kbd>
-              </TabsTrigger>
-              <TabsTrigger value="plot" ref={plotTabRef} aria-label="Plot" aria-keyshortcuts="Control+p">
-                <ChartNoAxesColumn /> Plot <Kbd aria-hidden="true">Ctrl P</Kbd>
-              </TabsTrigger>
-            </TabsList>
-            {state.editingId ? <Badge variant="secondary">Editing</Badge> : null}
-            <Button
-              className="ml-auto"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Calculator help"
-              onClick={() => dispatch({ type: 'help-changed', open: true })}
-            >
-              <CircleHelp />
-            </Button>
-          </div>
-
-          <TabsContent value="calculator" className="grid content-start gap-4">
-            <Field data-invalid={Boolean(editorError)}>
-              <FieldLabel htmlFor="calculator-expression">Expression</FieldLabel>
-              <div className="flex items-center gap-2">
-                <InputGroup>
-                  <div className="relative min-w-0 flex-1 font-mono text-base md:text-sm">
-                    <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center pl-2.5 pr-1.5">
-                      <div className="w-full overflow-hidden">
-                        {completion && <span className="block whitespace-pre" style={{ transform: `translateX(-${editorScroll}px)` }}><span className="invisible">{state.source}</span><span className="text-muted-foreground/60">{completion.suffix}</span></span>}
-                      </div>
-                    </div>
-                    <InputGroupInput
-                      className="font-mono pr-1.5"
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-autocomplete="inline"
-                      aria-describedby="calculator-function-hint"
-                      onFocus={() => setEditorFocused(true)}
-                      onBlur={() => setEditorFocused(false)}
-                      onSelect={event => { setCaret(event.currentTarget.selectionStart === event.currentTarget.selectionEnd ? event.currentTarget.selectionStart ?? 0 : -1) }}
-                      onScroll={event => setEditorScroll(event.currentTarget.scrollLeft)}
-                      ref={editorRef}
-                      id="calculator-expression"
-                      aria-label="Calculator expression"
-                      value={state.source}
-                      aria-invalid={Boolean(editorError)}
-                      placeholder="2x + 3 = 7"
-                      onChange={(event) => { dispatch({ type: 'source-changed', source: event.target.value }); setCaret(event.target.selectionStart ?? 0); setDismissed(false) }}
-                      onKeyDown={(event) => {
-                        if (event.nativeEvent.isComposing) return
-                        if (event.key === 'Escape') setDismissed(true)
-                        if ((event.key === 'Tab' || event.key === 'ArrowRight') && completion && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
-                          event.preventDefault()
-                          const source = state.source.slice(0, completion.replaceFrom) + completion.insertion
-                          dispatch({ type: 'source-changed', source })
-                          setCaret(source.length)
-                          requestAnimationFrame(() => editorRef.current?.setSelectionRange(source.length, source.length))
-                          return
-                        }
-                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                          event.preventDefault()
-                          if (!event.repeat) saveRelation()
-                        }
-                      }}
-                    />
-                  </div>
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      size="icon-xs"
-                      aria-label="Clear"
-                      onClick={() => {
-                        setEditorError(null)
-                        dispatch({ type: 'clear-editor' })
-                      }}
-                      disabled={!state.source && !state.editingId && !editorError}
-                    >
-                      <Eraser />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-                <Button
-                  size="sm"
-                  aria-label={state.editingId ? 'Save relation' : 'Add relation'}
-                  onClick={saveRelation}
-                >
-                  <Plus /> {state.editingId ? 'Save' : 'Add'}
-                </Button>
-              </div>
-              <p id="calculator-function-hint" className="min-h-4 text-xs text-muted-foreground" aria-live="polite">{completion ? `${completion.signature} · Tab or → to complete` : hint ?? 'Type a function for hints, including diff, Norm and P.'}</p>
-              {editorError ? <FieldError>{editorError}</FieldError> : null}
-            </Field>
-
-            <div className="flex min-h-20 min-w-0 items-center justify-center rounded-md bg-muted/50 p-4" aria-label="Rendered math preview">
-              <div className="max-w-full overflow-x-auto py-1 text-xl">
-                {preview ? (
-                  <MathExpression mathml={preview} />
-                ) : (
-                  <span className="text-sm text-muted-foreground">Your expression preview</span>
-                )}
-              </div>
-            </div>
-
-            <Tabs value={operationGroup} onValueChange={value => { setOperationGroup(value); setPendingGroup(null) }}>
-              <div className="pb-1">
-                <TabsList aria-label="Operations" className="max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto" activateOnFocus={false}>
-                  {OPERATION_GROUPS.map((group) => (
-                    <TabsTrigger key={group.name} value={group.name} ref={element => { operationTabRefs.current[group.shortcut] = element }} aria-label={group.name} aria-keyshortcuts={group.shortcut}>
-                      {group.name} <Kbd aria-hidden="true">{group.shortcut.toUpperCase()}</Kbd>
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </div>
-              {OPERATION_GROUPS.map((group) => (
-                <TabsContent key={group.name} value={group.name}>
-                  <div className="grid grid-cols-4 gap-2">
-                    {group.items.map((item) => (
-                      <Button
-                        key={item.id}
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-11 min-w-0 justify-between gap-2 px-2"
-                        aria-label={item.label}
-                        aria-description={`Keyboard shortcut: ${group.shortcut.toUpperCase()} then ${item.shortcut.toUpperCase()}`}
-                        onClick={() => insertOperation(item.template)}
-                      >
-                        <OperationLabel item={item} />
-                        <Kbd className="ml-auto shrink-0" aria-hidden="true">{item.shortcut.toUpperCase()}</Kbd>
-                      </Button>
-                    ))}
-                  </div>
-                </TabsContent>
-              ))}
-            </Tabs>
-            <p className="text-xs text-muted-foreground" role="status">
-              {pendingGroup ? `${pendingGroup.toUpperCase()} … Press an operation key, or Escape to return to the expression.` : 'Escape toggles between the expression and keyboard shortcuts.'}
-            </p>
-          </TabsContent>
-          <TabsContent value="plot" className="min-w-0 overflow-hidden">
-            {activeTab === 'plot' ? <RelationPlot relations={state.relations} /> : null}
-          </TabsContent>
-        </Tabs>
-
-        <Separator className="hidden lg:block" orientation="vertical" />
-        <Separator className="lg:hidden" />
-
-        <Tabs
-          value={relationsTab}
-          onValueChange={setRelationsTab}
-          className="min-w-0 gap-4"
-        >
+    <section className="calculator-math mx-auto w-full max-w-[1600px] p-4 sm:p-6" ref={workspaceRef} aria-label="Scientific calculator workspace"
+      onPointerDownCapture={() => { setPendingGroup(null); cancelAnimationFrame(shortcutFocusFrame.current) }}>
+      <div className="grid min-w-0 gap-5">
+        <section className="grid min-w-0 gap-3" aria-label="Equations section">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <TabsList aria-label="Relations tools" activateOnFocus={false}>
-              <TabsTrigger value="relations" ref={relationsTabRef} aria-label="Relations" aria-keyshortcuts="Control+r">Relations <Kbd aria-hidden="true">Ctrl R</Kbd></TabsTrigger>
-              <TabsTrigger value="library" ref={libraryTabRef} aria-label="Library" aria-keyshortcuts="Control+l">
-                <BookOpen /> Library <Kbd aria-hidden="true">Ctrl L</Kbd>
-              </TabsTrigger>
-            </TabsList>
-            {relationsTab === 'relations' ? (
-              <Button size="sm" onClick={() => void calculate()} disabled={state.solver.phase === 'loading'}>
-                <Calculator /> Calculate
-              </Button>
-            ) : (
-              <Button size="sm" disabled={selectedEquations.size === 0} onClick={() => addLibraryEquations()}>
-                <Plus /> Add selected{selectedEquations.size > 0 ? ` (${selectedEquations.size})` : ''}
-              </Button>
-            )}
+            <h2 className="text-sm font-medium">Equations</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" aria-keyshortcuts="Control+o" onClick={() => setPicker('functions')}>Functions <Kbd>Ctrl O</Kbd></Button>
+              <Button variant="outline" size="sm" aria-keyshortcuts="Control+e" onClick={() => setPicker('equations')}><BookOpen /> Equation library <Kbd>Ctrl E</Kbd></Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Calculator help" onClick={() => dispatch({ type: 'help-changed', open: true })}><CircleHelp /></Button>
+            </div>
           </div>
-          <TabsContent value="relations" className="grid content-start gap-4">
-            <div className="divide-y rounded-lg border">
-              {state.relations.length === 0 ? (
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyTitle>No relations yet</EmptyTitle>
-                    <EmptyDescription>Add an expression or choose equations from the library.</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : state.relations.map((relation) => (
-                <div className="flex items-center gap-3 px-3 py-2" data-testid="relation-row" key={relation.id}>
-                  <Checkbox
-                    checked={relation.enabled}
-                    aria-label={`Enable ${relation.source}`}
-                    onCheckedChange={(enabled) => dispatch({ type: 'enabled-changed', id: relation.id, enabled })}
-                  />
-                  <span
-                    className={`min-w-0 flex-1 overflow-x-auto py-1 text-base ${relation.enabled ? '' : 'text-muted-foreground'}`}
-                    aria-label={relation.source}
-                  >
-                    <MathExpression aria-hidden="true" mathml={relationToMathMl(relation.ast)} />
-                  </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${relation.source}`} />}>
-                      <Ellipsis />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="end"
-                      finalFocus={() => {
-                        if (!focusEditorAfterMenu.current) return true
-                        focusEditorAfterMenu.current = false
-                        return editorRef.current
-                      }}
-                    >
-                      <DropdownMenuItem
-                        onClick={() => {
-                          focusEditorAfterMenu.current = true
-                          setActiveTab('calculator')
-                          dispatch({ type: 'edit', id: relation.id })
-                        }}
-                      >
-                        <Pencil /> Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={!relation.enabled || state.solver.phase === 'loading'}
-                        onClick={() => void solveRelations([relation.ast], 'symbolic')}
-                      >
-                        <Calculator /> Solve
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive" onClick={() => dispatch({ type: 'delete', id: relation.id })}>
-                        <Trash2 /> Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              ))}
-            </div>
-            <Separator />
-            <ResultCard solver={state.solver} engine={engine} onRetry={() => client.retry()} />
-          </TabsContent>
-          <TabsContent value="library" className="grid min-w-0 content-start gap-4">
-            <p className="text-muted-foreground">Select individual equations or add a whole set to your relations.</p>
-            <div className="grid min-w-0 gap-5">
-              {LIBRARY_EQUATIONS.length === 0 ? (
-                <p className="text-muted-foreground">No equations in the library yet.</p>
-              ) : EQUATION_LIBRARY.map((file) => (
-                <div key={file.file} className="grid min-w-0 gap-3">
-                  <h3 className="text-sm font-medium text-muted-foreground">{file.file}</h3>
-                  {file.groups.map((group, groupIndex) => (
-                    <FieldSet key={groupIndex} className="min-w-0 gap-2">
-                      <FieldLegend variant="label" className="w-full">
-                        <span className="flex items-center justify-between gap-2">
-                          <span>{group.title}</span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            aria-label={`Add ${group.title} set from ${file.file}`}
-                            onClick={() => addLibraryEquations(group.equations)}
-                          >
-                            <Plus /> Add set
-                          </Button>
-                        </span>
-                      </FieldLegend>
-                      {group.equations.map((equation, equationIndex) => (
-                        <FieldLabel key={equationIndex}>
-                          <Field orientation="horizontal">
-                            <Checkbox
-                              checked={selectedEquations.has(equation)}
-                              aria-label={equation.source}
-                              onCheckedChange={(checked) => setSelectedEquations((previous) => {
-                                const next = new Set(previous)
-                                if (checked) next.add(equation)
-                                else next.delete(equation)
-                                return next
-                              })}
-                            />
-                            <MathExpression
-                              className="min-w-0 py-1 text-base font-normal"
-                              aria-hidden="true"
-                              mathml={relationToMathMl(equation.ast)}
-                            />
-                          </Field>
-                        </FieldLabel>
-                      ))}
-                    </FieldSet>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
+          <CellGrid label="Equations" columns={['Equation', 'Use', 'Actions']} widths={['80%', '10%', '10%']}
+            onActiveCellChange={(row, column) => selectCell({ grid: 'Equations', row, column })}
+            rows={[
+              ...state.relations.map((equation, row) => ({ id: equation.id, cells: [
+                { text: equation.source, content: editing('Equations', equation.id, 0) ? cellEditor() : <MathExpression mathml={relationToMathMl(equation.ast)} />, onActivate: () => startEdit(equationTarget(row)), onType: (text: string) => startEdit(equationTarget(row), text) },
+                { text: equation.enabled ? 'Yes' : 'No', content: <Checkbox tabIndex={-1} checked={equation.enabled} aria-label={`Enable ${equation.source}`} onCheckedChange={enabled => dispatch({ type: 'enabled-changed', id: equation.id, enabled })} />, onActivate: () => dispatch({ type: 'enabled-changed', id: equation.id, enabled: !equation.enabled }) },
+                { text: 'Actions', content: equationActions(equation, row) },
+              ] })),
+              { id: 'new-equation', cells: [
+                { text: '', content: editing('Equations', null, 0) ? cellEditor() : <span className="text-muted-foreground">Add an equation…</span>, onActivate: () => startEdit(equationTarget(state.relations.length)), onType: (text: string) => startEdit(equationTarget(state.relations.length), text) },
+                { text: '' }, { text: '' },
+              ] },
+            ]} />
+        </section>
+        <section className="grid min-w-0 gap-3 border-t pt-4" aria-label="Variables section">
+          <h2 className="text-sm font-medium">Variables <Kbd>Ctrl F</Kbd></h2>
+          <CellGrid label="Variables" columns={['Variable', 'Value / expression', 'Actions']} widths={['25%', '65%', '10%']}
+            onActiveCellChange={(row, column) => selectCell({ grid: 'Variables', row, column })}
+            rows={[
+              ...variables.map((variable, row) => ({ id: variable.id, cells: variableCells(variable, row) })),
+              { id: 'new-variable', cells: [0, 1, 2].map(column => ({ text: '', content: editTarget?.grid === 'Variables' && !variables.some(variable => variable.id === editTarget.id) && editTarget.column === column ? cellEditor() : column < 2 ? <span className="text-muted-foreground">{column === 0 ? 'Optional name' : 'Add a value or expression…'}</span> : null,
+                ...(column < 2 ? { onActivate: () => startEdit(variableTarget(variables.length, column)), onType: (text: string) => startEdit(variableTarget(variables.length, column), text) } : {}),
+              })) },
+            ]} />
+          <p className="text-xs text-muted-foreground">Values update automatically. Hover to see the expression; Enter or double-click to edit. Grey values are solved and locked.</p>
+          <p id="calculator-function-hint" className="text-xs text-muted-foreground" aria-live="polite">{completion ? `${completion.signature} · Tab or → to complete` : hint}</p>
+          <ResultCard solver={state.solver} engine={engine} onRetry={() => { client.retry(); setRetryCount(count => count + 1) }} />
+        </section>
       </div>
+      <Dialog open={picker === 'functions'} onOpenChange={open => { if (!open) { setPicker(null); setPendingGroup(null) } }}>
+        <DialogContent data-functions-picker finalFocus={returnToCell} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Operators / functions</DialogTitle>
+            <DialogDescription>{functionInsertionLocked ? 'Select an editable value or equation cell to insert a function.' : 'Choose a function to insert into the active cell.'}</DialogDescription>
+          </DialogHeader>
+          {OPERATION_GROUPS.map(group => (
+            <FieldSet key={group.name} className="min-w-0 gap-2">
+              <FieldLegend variant="label">{group.name} <Kbd>{group.shortcut.toUpperCase()}</Kbd></FieldLegend>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {group.items.map((item, index) => (
+                  <Button key={item.id} ref={element => { if (index === 0) operationGroupRefs.current[group.shortcut] = element }}
+                    variant="ghost" size="sm" className="h-11 min-w-0 justify-between gap-2 px-2"
+                    aria-label={item.label} aria-description={`Keyboard shortcut: ${group.shortcut.toUpperCase()} then ${item.shortcut.toUpperCase()}`}
+                    disabled={functionInsertionLocked}
+                    onClick={() => insertOperation(item.template)}>
+                    <OperationLabel item={item} />
+                    <Kbd className="ml-auto shrink-0" aria-hidden="true">{item.shortcut.toUpperCase()}</Kbd>
+                  </Button>
+                ))}
+              </div>
+            </FieldSet>
+          ))}
+          <p className="text-xs text-muted-foreground" role="status">{pendingGroup ? `${pendingGroup.toUpperCase()} … Press an operation key.` : 'Choose a button, or press a group key followed by an operation key.'}</p>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={picker === 'equations'} onOpenChange={open => { if (!open) setPicker(null) }}>
+        <DialogContent finalFocus={returnToCell} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Equations</DialogTitle>
+            <DialogDescription>Select equations or add a whole set to the Equations grid.</DialogDescription>
+          </DialogHeader>
+          <Button className="justify-self-start" size="sm" disabled={selectedEquations.size === 0} onClick={() => addLibraryEquations()}><Plus /> Add selected{selectedEquations.size > 0 ? ` (${selectedEquations.size})` : ''}</Button>
+          <div className="grid min-w-0 gap-5">
+            {LIBRARY_EQUATIONS.length === 0 ? (
+              <p className="text-muted-foreground">No equations in the library yet.</p>
+            ) : EQUATION_LIBRARY.map((file) => (
+              <div key={file.file} className="grid min-w-0 gap-3">
+                <h3 className="text-sm font-medium text-muted-foreground">{file.file}</h3>
+                {file.groups.map((group, groupIndex) => (
+                  <FieldSet key={groupIndex} className="min-w-0 gap-2">
+                    <FieldLegend variant="label" className="w-full">
+                      <span className="flex items-center justify-between gap-2">
+                        <span>{group.title}</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={`Add ${group.title} set from ${file.file}`}
+                          onClick={() => addLibraryEquations(group.equations)}
+                        >
+                          <Plus /> Add set
+                        </Button>
+                      </span>
+                    </FieldLegend>
+                    {group.equations.map((equation, equationIndex) => (
+                      <FieldLabel key={equationIndex}>
+                        <Field orientation="horizontal">
+                          <Checkbox
+                            checked={selectedEquations.has(equation)}
+                            aria-label={equation.source}
+                            onCheckedChange={() => toggleEquation(equation)}
+                          />
+                          <MathExpression
+                            className="min-w-0 py-1 text-base font-normal"
+                            aria-hidden="true"
+                            mathml={relationToMathMl(equation.ast)}
+                          />
+                        </Field>
+                      </FieldLabel>
+                    ))}
+                  </FieldSet>
+                ))}
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={state.helpOpen}
         onOpenChange={(open) => dispatch({ type: 'help-changed', open })}
       >
-        <DialogContent finalFocus={editorRef} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogContent finalFocus={returnToCell} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Calculator help</DialogTitle>
             <DialogDescription>Notation and V1 result states.</DialogDescription>
